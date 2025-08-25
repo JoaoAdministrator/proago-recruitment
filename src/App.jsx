@@ -297,7 +297,7 @@ function LegalModals({ showPrivacy, setShowPrivacy, showTerms, setShowTerms }){
         </div>
       </div>
     )}
-    {showTerms and (
+    {showTerms && (
       <div className="fixed inset-0 bg-black/30 z-50 p-4" onClick={()=>setShowTerms(false)}>
         <div className="bg-white max-w-2xl mx-auto rounded-2xl border border-slate-200 shadow-lg p-4" onClick={e=>e.stopPropagation()}>
           <div className="flex items-center gap-2 mb-2"><Info className="w-5 h-5"/><b>Terms of Use</b></div>
@@ -371,7 +371,7 @@ export default function App(){
 
   // Auth helpers
   function checkLock(){
-    try{ const lock=JSON.parse(localStorage.getItem(AUTH_FAILS_KEY)||"null"); if(lock and lock.until and Date.now()<lock.until) return lock; }catch{}; return null; }
+    try{ const lock=JSON.parse(localStorage.getItem(AUTH_FAILS_KEY)||"null"); if(lock && lock.until && Date.now()<lock.until) return lock; }catch{}; return null; }
   function recordFail(){
     const lock=checkLock(); if(lock){ localStorage.setItem(AUTH_FAILS_KEY, JSON.stringify({count:lock.count+1, until:lock.until})); return; }
     const prev=JSON.parse(localStorage.getItem(AUTH_FAILS_KEY)||"null");
@@ -382,7 +382,7 @@ export default function App(){
 
   function handleLogin(username,password,rememberMe){
     const lock=checkLock(); if(lock){ const mins=Math.ceil((lock.until-Date.now())/60000); alert(`Too many attempts. Try again in ${mins} min.`); return; }
-    if(username===AUTH_USER and password===AUTH_PASS){
+    if(username===AUTH_USER && password===AUTH_PASS){
       if(rememberMe){ localStorage.setItem(AUTH_KEY_PERSIST,"1"); } else { sessionStorage.setItem(AUTH_KEY_SESSION,"1"); }
       setAuthed(true); clearFails();
     } else { recordFail(); alert("Incorrect username or password."); }
