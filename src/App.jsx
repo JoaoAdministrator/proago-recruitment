@@ -485,6 +485,74 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
     </div>
   );
 };
+/* ──────────────────────────────────────────────────────────────────────────
+  Recruiters (last5 list, avg color, thresholds for Box2/Box4, Active/Inactive)
+────────────────────────────────────────────────────────────────────────── */
+const roles = ["Rookie", "Promoter", "Pool Captain", "Team Captain", "Sales Manager"];
+
+const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
+  const [detail, setDetail] = useState(null);
+  const [edit, setEdit] = useState(null);
+  const [sortBy, setSortBy] = useState("name"); // name | crew | role | avg | b2 | b4
+  const [sortDir, setSortDir] = useState("asc"); // asc | desc
+  const [status, setStatus] = useState("active"); // active | inactive | all
+
+  const avgColor = (n) => (n >= 3 ? "#10b981" : n >= 2 ? "#fbbf24" : "#ef4444");
+  const box2Color = (pct) => (pct >= 70 ? "#10b981" : "#ef4444");
+  const box4Color = (pct) => (pct >= 40 ? "#10b981" : "#ef4444");
+
+  const last5ScoresMemo = useMemo(() => (id) => last5Scores(history, id), [history]);
+
+  const decorate = (r) => {
+    const last5 = last5ScoresMemo(r.id);
+    const avg = last5.length ? last5.reduce((s, n) => s + n, 0) / last5.length : 0;
+    const { b2, b4 } = boxPercentsLast8w(history, r.id);
+    return { ...r, _avg: avg, _last5: last5, _b2: b2, _b4: b4 };
+  };
+
+  const filtered = recruiters
+    .filter((r) => (status === "all" ? true : status === "active" ? !r.isInactive : !!r.isInactive))
+    .map(decorate)
+    .sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      switch (sortBy) {
+        case "crew":
+          return String(a.crewCode || "").localeCompare(String(b.crewCode || "")) * dir;
+        case "role":
+          return String(a.role || "").localeCompare(String(b.role || "")) * dir;
+        case "avg":
+          return (a._avg - b._avg) * dir;
+        case "b2":
+          return (a._b2 - b._b2) * dir;
+        case "b4":
+          return (a._b4 - b._b4) * dir;
+        default:
+          return String(a.name || "").localeCompare(String(b.name || "")) * dir;
+      }
+    });
+
+  const toggleStatus = (id) =>
+    setRecruiters((all) => all.map((r) => (r.id === id ? { ...r, isInactive: !r.isInactive } : r)));
+
+  const del = (id) => {
+    if (!confirm("Delete recruiter? History will be kept.")) return;
+    setRecruiters(recruiters.filter((r) => r.id !== id));
+  };
+
+  // History inline editors (location/score/box2/box4/role)
+  const updateHistField = (recId, dateISO, key, raw) => {
+    setHistory((h) =>
+      upsertHistory(h, {
+        recruiterId: recId,
+        dateISO,
+        [key]:
+          key === "score" || key === "box2" || key === "box4"
+            ? raw === "" ? undefined : Number(raw)
+            : raw,
+      })
+    );
+  };
+
   return (
     <div className="grid gap-4">
       {/* Sort & filter bar */}
