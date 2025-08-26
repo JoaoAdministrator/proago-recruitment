@@ -1,4 +1,5 @@
-// App.jsx — Proago Recruitment v3
+// App.jsx — Proago Recruitment v3 (with Indeed Import)
+// One file. Replace your src/App.jsx with this.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "./components/ui/button";
@@ -54,7 +55,7 @@ const K = {
   recruiters: "proago_recruiters_v3",
   pipeline: "proago_pipeline_v3",
   history: "proago_history_v3",
-  planning: "proago_planning_v3", // { [weekStartISO]: { days: { [dateISO]: { teams:[{name,location,members:[]}] } } } }
+  planning: "proago_planning_v3",
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -109,6 +110,63 @@ const last5Avg = (history, id) => {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
+  Import normalization — accepts our shape OR Indeed JSON
+────────────────────────────────────────────────────────────────────────── */
+// Accepts our app shape OR Indeed application JSON (single or array) and normalizes to {leads, interview, formation}
+function normalizeImportedJson(raw) {
+  // Case A: already our shape
+  if (raw && Array.isArray(raw.leads) && Array.isArray(raw.interview) && Array.isArray(raw.formation)) {
+    return raw;
+  }
+
+  // Indeed one object
+  const looksLikeIndeedOne =
+    raw && typeof raw === "object" &&
+    raw.applicant && (raw.applicant.fullName || raw.applicant.phoneNumber);
+
+  // Indeed array
+  const looksLikeIndeedArray =
+    Array.isArray(raw) &&
+    raw.length > 0 &&
+    raw[0] && raw[0].applicant && (raw[0].applicant.fullName || raw[0].applicant.phoneNumber);
+
+  const toLead = (obj) => {
+    const a = obj.applicant || {};
+    const name = (a.fullName || "").trim();
+    const phone = (a.phoneNumber || "").toString().replace(/\s+/g, " ").trim();
+    return {
+      id: `lead_${obj.id || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()))}`,
+      name,
+      phone,
+      source: "Indeed",
+    };
+  };
+
+  if (looksLikeIndeedOne) {
+    return { leads: [toLead(raw)], interview: [], formation: [] };
+  }
+  if (looksLikeIndeedArray) {
+    return { leads: raw.map(toLead), interview: [], formation: [] };
+  }
+
+  // Plain array of simple objects {name,phone,source}
+  if (Array.isArray(raw)) {
+    return {
+      leads: raw.map((r, i) => ({
+        id: r.id || `lead_${i}_${Date.now()}`,
+        name: r.name || "",
+        phone: r.phone || "",
+        source: r.source || "Import",
+      })),
+      interview: [],
+      formation: [],
+    };
+  }
+
+  throw new Error("Unsupported import file format.");
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
   Auth gate
 ────────────────────────────────────────────────────────────────────────── */
 const Login = ({ onOk }) => {
@@ -160,7 +218,6 @@ const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
     <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
       <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          {/* Uses /proago-icon.png if present */}
           <img
             src="/proago-icon.png"
             alt="Proago"
@@ -206,7 +263,7 @@ const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
 );
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Inflow (Pipeline) — Import + Add Lead dialog
+  Inflow (Pipeline) — Import (supports Indeed) + Add Lead dialog
 ────────────────────────────────────────────────────────────────────────── */
 const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
   const [name, setName] = useState("");
@@ -257,7 +314,7 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
             onClick={() => {
               if (!name.trim()) return alert("Name required");
               const lead = {
-                id: crypto.randomUUID(),
+                id: (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
                 name: name.trim(),
                 phone: phone.trim(),
                 source: source.trim(),
@@ -296,7 +353,6 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
     code = String(code).trim();
     const role = prompt("Role (default Rookie):", "Rookie") || "Rookie";
     onHire({ ...item, crewCode: code, role });
-    // remove from Formation
     const next = structuredClone(pipeline);
     next.formation = next.formation.filter((x) => x.id !== item.id);
     setPipeline(next);
@@ -313,16 +369,19 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
     a.click();
     URL.revokeObjectURL(url);
   };
-  const importJSON = (file) => {
+
+  // NEW: import handler using normalizeImportedJson (supports Indeed JSON)
+  const onImportPipeline = (file) => {
     const fr = new FileReader();
     fr.onload = () => {
       try {
         const data = JSON.parse(fr.result);
-        if (!data || !data.leads || !data.interview || !data.formation)
-          throw new Error("shape");
-        setPipeline(data);
-      } catch {
-        alert("Invalid JSON file");
+        const normalized = normalizeImportedJson(data);
+        setPipeline(normalized);
+        alert("Import done ✅");
+      } catch (err) {
+        console.error(err);
+        alert("Import failed: " + (err?.message || "Invalid file"));
       }
     };
     fr.readAsText(file);
@@ -402,7 +461,7 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
             type="file"
             accept="application/json"
             hidden
-            onChange={(e) => e.target.files?.[0] && importJSON(e.target.files[0])}
+            onChange={(e) => e.target.files?.[0] && onImportPipeline(e.target.files[0])}
           />
           <Button style={{ background: "#d9010b", color: "white" }} onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4 mr-1" />
@@ -602,7 +661,6 @@ const ensureWeek = (state, weekISO) => {
 
 const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) => {
   const [weekStart, setWeekStart] = useState(() => fmtISO(startOfWeekMon(new Date())));
-  // ensure structure exists
   useEffect(() => setPlanning((p) => ensureWeek(p, weekStart)), [weekStart]);
 
   const weekObj = ensureWeek(planning, weekStart)[weekStart];
@@ -626,7 +684,6 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
     const next = structuredClone(planning);
     ensureWeek(next, weekStart);
     const day = next[weekStart].days[dateISO];
-    // one shift per day
     const exists = day.teams.some((t) => t.members.includes(recruiterId));
     if (exists) return alert("This recruiter is already assigned this day.");
     day.teams[ti].members.push(recruiterId);
@@ -824,7 +881,6 @@ export default function App() {
           pipeline={pipeline}
           setPipeline={setPipeline}
           onHire={(rec) => {
-            // upsert recruiter by crewCode if exists
             setRecruiters((all) => {
               const i = all.findIndex((r) => String(r.crewCode) === String(rec.crewCode));
               if (i >= 0) {
@@ -832,7 +888,7 @@ export default function App() {
                 next[i] = { ...next[i], name: rec.name, role: rec.role, crewCode: rec.crewCode };
                 return next;
               }
-              return [...all, { id: crypto.randomUUID(), name: rec.name, crewCode: rec.crewCode, role: rec.role }];
+              return [...all, { id: (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())), name: rec.name, crewCode: rec.crewCode, role: rec.role }];
             });
           }}
         />
