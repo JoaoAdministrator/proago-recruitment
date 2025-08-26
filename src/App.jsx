@@ -308,10 +308,11 @@ const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
 ────────────────────────────────────────────────────────────────────────── */
 const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
   const [name, setName] = useState("");
-  the:
   const [phone, setPhone] = useState("");
   const [source, setSource] = useState("Indeed");
+
   const reset = () => { setName(""); setPhone(""); setSource("Indeed"); };
+
   return (
     <Dialog open={open} onOpenChange={(v)=>{ reset(); onOpenChange(v); }}>
       <DialogContent>
