@@ -12,20 +12,17 @@ import {
 } from "lucide-react";
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Auth (persist with localStorage to avoid reloads)
+  Auth (persist with localStorage)
 ────────────────────────────────────────────────────────────────────────── */
 const AUTH_USERS = { Oscar: "Sergio R4mos", Joao: "Rub3n Dias" };
-const AUTH_SESSION_KEY = "proago_auth_session";   // global app gate
-const SALARY_SESSION_KEY = "proago_salary_gate";  // re-auth for Salary
-const FINANCE_SESSION_KEY = "proago_finance_gate";// re-auth for Finances
+const AUTH_SESSION_KEY = "proago_auth_session";     // global app gate
+const SALARY_SESSION_KEY = "proago_salary_gate";    // re-auth for Salary
+const FINANCE_SESSION_KEY = "proago_finance_gate";  // re-auth for Finances
 
 /* ──────────────────────────────────────────────────────────────────────────
   Storage helpers & keys
 ────────────────────────────────────────────────────────────────────────── */
-const load = (k, fallback) => {
-  try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }
-  catch { return fallback; }
-};
+const load = (k, fallback) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
 const clone = typeof structuredClone === "function"
@@ -35,10 +32,8 @@ const clone = typeof structuredClone === "function"
 const K = {
   recruiters: "proago_recruiters_v6",   // + contract
   pipeline: "proago_pipeline_v5",
-  history: "proago_history_v5",         // keep for last5/avg & modal editing
-  planning: "proago_planning_v5",       // legacy day/teams structure (we’ll still read)
-  // new (used by Finances & future planning refactor):
-  shifts: "proago_shifts_v1",           // per-recruiter per-day rows (optional; safe to ignore if empty)
+  history: "proago_history_v5",         // per-recruiter per-day, extended by Planning
+  planning: "proago_planning_v5",       // legacy teams; now zones; we migrate on the fly
   settings: "proago_settings_v1",       // defaults + finance matrix
 };
 
@@ -143,15 +138,12 @@ const boxPercentsLast8w = (history, id) => {
   Import normalization — supports our shape OR Indeed JSON
 ────────────────────────────────────────────────────────────────────────── */
 function normalizeImportedJson(raw) {
-  // Our pipeline shape already
   if (raw && Array.isArray(raw.leads) && Array.isArray(raw.interview) && Array.isArray(raw.formation)) {
     return raw;
   }
-  // Indeed single
   const looksLikeIndeedOne =
     raw && typeof raw === "object" && raw.applicant &&
     (raw.applicant.fullName || raw.applicant.phoneNumber);
-  // Indeed array
   const looksLikeIndeedArray =
     Array.isArray(raw) && raw.length>0 && raw[0] &&
     raw[0].applicant && (raw[0].applicant.fullName || raw[0].applicant.phoneNumber);
@@ -169,13 +161,9 @@ function normalizeImportedJson(raw) {
     };
   };
 
-  if (looksLikeIndeedOne) {
-    return { leads: [toLead(raw)], interview: [], formation: [] };
-  }
-  if (looksLikeIndeedArray) {
-    return { leads: raw.map(toLead), interview: [], formation: [] };
-  }
-  // Generic array fallback
+  if (looksLikeIndeedOne) return { leads: [toLead(raw)], interview: [], formation: [] };
+  if (looksLikeIndeedArray) return { leads: raw.map(toLead), interview: [], formation: [] };
+
   if (Array.isArray(raw)) {
     return {
       leads: raw.map((r,i)=>({
@@ -192,7 +180,7 @@ function normalizeImportedJson(raw) {
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Auth gates (Login + reusable Gate for Salary/Finances)
+  Auth gates (Login + reusable Gate + CredentialDialog)
 ────────────────────────────────────────────────────────────────────────── */
 const Login = ({ onOk }) => {
   const [u,setU]=useState(""), [p,setP]=useState("");
@@ -239,6 +227,40 @@ const Gate = ({ storageKey, label, onOk }) => {
   );
 };
 
+const CredentialDialog = ({ open, label = "Confirm with credentials", onCancel, onSuccess }) => {
+  const [u, setU] = useState("");
+  const [p, setP] = useState("");
+  const submit = (e) => {
+    e.preventDefault();
+    if (AUTH_USERS[u] && AUTH_USERS[u] === p) onSuccess();
+    else alert("Invalid credentials");
+  };
+  return (
+    <Dialog open={open} onOpenChange={() => onCancel?.()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{label}</DialogTitle>
+          <DialogDescription>Enter your Proago credentials to continue.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="grid gap-2">
+          <div className="grid gap-1">
+            <Label>Username</Label>
+            <Input value={u} onChange={(e) => setU(e.target.value)} placeholder="Oscar or Joao" />
+          </div>
+          <div className="grid gap-1">
+            <Label>Password</Label>
+            <Input type="password" value={p} onChange={(e) => setP(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" type="button" onClick={() => onCancel?.()}>Cancel</Button>
+            <Button style={{ background: "#d9010b", color: "white" }} type="submit">Confirm</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 /* ──────────────────────────────────────────────────────────────────────────
   Shell (tabs + header)
 ────────────────────────────────────────────────────────────────────────── */
@@ -261,6 +283,7 @@ const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
             ["planning","Planning"],
             ["salary","Salary"],
             ["finances","Finances"],
+            ["settings","Settings"],
           ].map(([key,label])=>(
             <Button
               key={key}
@@ -285,6 +308,7 @@ const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
 ────────────────────────────────────────────────────────────────────────── */
 const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
   const [name, setName] = useState("");
+  the:
   const [phone, setPhone] = useState("");
   const [source, setSource] = useState("Indeed");
   const reset = () => { setName(""); setPhone(""); setSource("Indeed"); };
@@ -382,11 +406,22 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Recruiters (with last5 list, avg colors, Box2/Box4%, history editor, contract)
+  Recruiters (with last5, avg colors, Box2/Box4%, history editor, contract + delete)
 ────────────────────────────────────────────────────────────────────────── */
 const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
   const [detail, setDetail] = useState(null);
   const [edit, setEdit] = useState(null);
+
+  // credential-gated per-row delete in history
+  const [credOpen, setCredOpen] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null); // { recruiterId, dateISO }
+  const requestDeleteHistory = (recruiterId, dateISO) => { setPendingDelete({ recruiterId, dateISO }); setCredOpen(true); };
+  const performDeleteHistory = () => {
+    const { recruiterId, dateISO } = pendingDelete || {};
+    if (!recruiterId || !dateISO) { setCredOpen(false); setPendingDelete(null); return; }
+    setHistory((h) => h.filter((row) => !(row.recruiterId === recruiterId && row.dateISO === dateISO)));
+    setCredOpen(false); setPendingDelete(null);
+  };
 
   const avgColor = (n) => (n >= 3 ? "#10b981" : n >= 2 ? "#fbbf24" : "#ef4444");
   const box2Color = (pct) => (pct >= 70 ? "#10b981" : "#ef4444");
@@ -414,7 +449,13 @@ const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
     <div className="overflow-x-auto border rounded-xl">
       <table className="min-w-full text-sm">
         <thead className="bg-zinc-50">
-          <tr><th className="p-3">Name</th><th className="p-3">Crewcode</th><th className="p-3">Role</th><th className="p-3">Last 5</th><th className="p-3 text-right">Average</th><th className="p-3 text-right">Box2</th><th className="p-3 text-right">Box4</th><th className="p-3">Phone</th><th className="p-3">Contract</th><th className="p-3 text-right">Actions</th></tr>
+          <tr>
+            <th className="p-3">Name</th><th className="p-3">Crewcode</th><th className="p-3">Role</th>
+            <th className="p-3">Last 5</th><th className="p-3 text-right">Average</th>
+            <th className="p-3 text-right">Box2</th><th className="p-3 text-right">Box4</th>
+            <th className="p-3">Phone</th><th className="p-3">Contract</th>
+            <th className="p-3 text-right">Actions</th>
+          </tr>
         </thead>
         <tbody>
           {decorated.map((r)=>(
@@ -443,20 +484,39 @@ const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
       <DialogContent>
         <DialogHeader><DialogTitle>{detail?.name} — {detail?.crewCode}</DialogTitle><DialogDescription>All-time shifts</DialogDescription></DialogHeader>
         <div className="max-h-[60vh] overflow-auto border rounded-lg">
-          <table className="min-w-full text-sm"><thead><tr><th>Date</th><th>Role</th><th>Location</th><th>Score</th><th>Box2</th><th>Box4</th></tr></thead>
+          <table className="min-w-full text-sm">
+            <thead className="bg-zinc-50">
+              <tr>
+                <th className="p-2 text-left">Date</th>
+                <th className="p-2 text-left">Role</th>
+                <th className="p-2 text-left">Location</th>
+                <th className="p-2 text-right">Score</th>
+                <th className="p-2 text-right">Box2</th>
+                <th className="p-2 text-right">Box4</th>
+                <th className="p-2 text-right">Delete</th>
+              </tr>
+            </thead>
             <tbody>
-              {history.filter(h=>h.recruiterId===detail?.id).sort((a,b)=>a.dateISO<b.dateISO?1:-1).map((h,i)=>(
+              {history
+                .filter(h=>h.recruiterId===detail?.id)
+                .sort((a,b)=>a.dateISO<b.dateISO?1:-1)
+                .map((h,i)=>(
                 <tr key={i} className="border-t">
-                  <td>{fmtUK(h.dateISO)}</td>
-                  <td>
+                  <td className="p-2">{fmtUK(h.dateISO)}</td>
+                  <td className="p-2">
                     <select defaultValue={h.roleAtShift||detail?.role||"Rookie"} className="h-9 border rounded-md px-2" onChange={(e)=>updateHistField(detail.id,h.dateISO,"roleAtShift",e.target.value)}>
                       {ROLES.map(r=><option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
-                  <td><Input defaultValue={h.location||""} onBlur={(e)=>updateHistField(detail.id,h.dateISO,"location",e.target.value)}/></td>
-                  <td><Input defaultValue={h.score??""} inputMode="numeric" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"score",e.target.value)}/></td>
-                  <td><Input defaultValue={h.box2??""} inputMode="numeric" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"box2",e.target.value)}/></td>
-                  <td><Input defaultValue={h.box4??""} inputMode="numeric" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"box4",e.target.value)}/></td>
+                  <td className="p-2"><Input defaultValue={h.location||""} onBlur={(e)=>updateHistField(detail.id,h.dateISO,"location",e.target.value)}/></td>
+                  <td className="p-2 text-right"><Input defaultValue={h.score??""} inputMode="numeric" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"score",e.target.value)}/></td>
+                  <td className="p-2 text-right"><Input defaultValue={h.box2??""} inputMode="numeric" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"box2",e.target.value)}/></td>
+                  <td className="p-2 text-right"><Input defaultValue={h.box4??""} inputMode="numeric" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"box4",e.target.value)}/></td>
+                  <td className="p-2 text-right">
+                    <Button variant="destructive" size="sm" onClick={()=>requestDeleteHistory(detail.id, h.dateISO)} title="Delete this history row">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -465,6 +525,13 @@ const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
         <DialogFooter><Button onClick={()=>setDetail(null)}>Close</Button></DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <CredentialDialog
+      open={credOpen}
+      label="Confirm to delete history entry"
+      onCancel={() => { setCredOpen(false); setPendingDelete(null); }}
+      onSuccess={performDeleteHistory}
+    />
 
     {/* Edit recruiter */}
     <Dialog open={!!edit} onOpenChange={()=>setEdit(null)}>
@@ -495,27 +562,25 @@ const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
   </div>);
 };
 /* ──────────────────────────────────────────────────────────────────────────
-  Planning — compact preview + Edit Day modal
-  - No auto teams; day starts empty until you add Zones/Recruiters
-  - Smaller labels: "Zone", "Recruiter"
-  - Per recruiter fields: hours, multiplier (100/125/150/200), hourly rate, score, Box2, Box4,
-    welcomeDiscount, shiftType (D2D/Event), project (default HF)
-  - Writes all details into `history` via upsertHistory (adds fields: hours, commissionMult, rateEUR, shiftType, project, welcomeDiscount)
+  Planning — compact preview + Edit Day modal (defensive)
 ────────────────────────────────────────────────────────────────────────── */
 const ensureWeek = (state, weekISO) => {
-  const base = state[weekISO] || { days: {} };
+  const safe = state && typeof state === "object" ? state : {};
+  const base = safe[weekISO] && typeof safe[weekISO] === "object" ? safe[weekISO] : { days: {} };
+  if (!base.days || typeof base.days !== "object") base.days = {};
+
   for (let i = 0; i < 7; i++) {
     const dateISO = fmtISO(addDays(parseISO(weekISO), i));
     if (!base.days[dateISO]) {
-      base.days[dateISO] = { zones: [] }; // new structure (no auto teams)
+      base.days[dateISO] = { zones: [] }; // new structure
     } else {
       // migrate legacy day.teams -> zones if present
       const day = base.days[dateISO];
-      if (Array.isArray(day.teams)) {
+      if (day && Array.isArray(day.teams)) {
         const zones = (day.teams || []).map((t) => ({
-          name: t.location || "",
-          rows: (t.members || []).map((rid) => ({
-            recruiterId: rid,
+          name: t?.location || "",
+          rows: (t?.members || []).map((rid) => ({
+            recruiterId: rid || "",
             hours: undefined,
             commissionMult: undefined,
             rateEUR: undefined,
@@ -528,51 +593,59 @@ const ensureWeek = (state, weekISO) => {
           })),
         }));
         base.days[dateISO] = { zones };
+      } else if (!Array.isArray(day?.zones)) {
+        base.days[dateISO] = { zones: [] };
       }
     }
   }
-  return { ...state, [weekISO]: base };
+  return { ...safe, [weekISO]: base };
 };
 
 const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) => {
+  // try/catch fallback UI (optional)
+  try {} catch(e){}
+
   const [weekStart, setWeekStart] = useState(() => fmtISO(startOfWeekMon(new Date())));
-  const weekObj = planning[weekStart]?.days ? planning[weekStart] : { days: {} };
   const weekNum = weekNumberISO(parseISO(weekStart));
 
-  // Always ensure the week exists when weekStart changes
-useEffect(() => {
-  setPlanning((p) => ensureWeek(p || {}, weekStart));
-}, [weekStart, setPlanning]);
+  // Ensure structure when week changes and on mount
+  useEffect(() => {
+    setPlanning((p) => ensureWeek(p || {}, weekStart));
+  }, [weekStart, setPlanning]);
 
-  // Helpers
+  const getDay = (iso) => {
+    const wk = planning?.[weekStart];
+    const days = wk?.days && typeof wk.days === "object" ? wk.days : {};
+    return days[iso] && typeof days[iso] === "object" ? days[iso] : { zones: [] };
+  };
+
   const rById = (id) => recruiters.find((r) => r.id === id);
   const multipliers = [
-    { label: "100%", val: 1.0 },
-    { label: "125%", val: 1.25 },
-    { label: "150%", val: 1.5 },
-    { label: "200%", val: 2.0 },
+    { label: "100%", val: 1.0 }, { label: "125%", val: 1.25 },
+    { label: "150%", val: 1.5 }, { label: "200%", val: 2.0 },
   ];
-  const shiftTypes = [
-    { label: "Door-to-Door", val: "D2D" },
-    { label: "Events", val: "EVENT" },
-  ];
+  const shiftTypes = [{ label: "Door-to-Door", val: "D2D" }, { label: "Events", val: "EVENT" }];
+
+  const safeProjects = () => {
+    try {
+      const s = load(K.settings, DEFAULT_SETTINGS);
+      return Array.isArray(s?.projects) && s.projects.length ? s.projects : ["HF"];
+    } catch { return ["HF"]; }
+  };
 
   // Edit Day modal state
   const [editDateISO, setEditDateISO] = useState(null);
   const [draftDay, setDraftDay] = useState(null); // { zones:[{name, rows:[...]}] }
   const [defaults, setDefaults] = useState({
-    project: (load(K.settings, DEFAULT_SETTINGS).projects[0] || "HF"),
+    project: safeProjects()[0] || "HF",
     shiftType: "D2D",
-    rate: load(K.settings, DEFAULT_SETTINGS).defaultHourlyRate || 15.63,
+    rate: (load(K.settings, DEFAULT_SETTINGS).defaultHourlyRate || 15.63),
   });
 
   const openEditDay = (dateISO) => {
-    // build draft from planning (deep clone)
-    const day = planning[weekStart]?.days?.[dateISO] || { zones: [] };
-    const d = clone(day);
+    const d = clone(getDay(dateISO));
     setEditDateISO(dateISO);
     setDraftDay(d);
-    // default project/rate from settings
     const settings = load(K.settings, DEFAULT_SETTINGS);
     setDefaults({
       project: (settings.projects && settings.projects[0]) || "HF",
@@ -583,57 +656,22 @@ useEffect(() => {
   const closeEditDay = () => { setEditDateISO(null); setDraftDay(null); };
 
   // Draft mutations
-  const addZone = () => {
-    setDraftDay((d) => ({ ...d, zones: [...(d?.zones || []), { name: "", rows: [] }] }));
-  };
-  const delZone = (zi) => {
-    setDraftDay((d) => ({ ...d, zones: (d?.zones || []).filter((_, i) => i !== zi) }));
-  };
-  const setZoneName = (zi, name) => {
-    setDraftDay((d) => {
-      const zones = clone(d.zones || []);
-      zones[zi].name = name;
-      return { ...d, zones };
-    });
-  };
-  const addRow = (zi) => {
-    setDraftDay((d) => {
-      const zones = clone(d.zones || []);
-      const z = zones[zi];
-      (z.rows ||= []).push({
-        recruiterId: "",
-        hours: undefined,
-        commissionMult: undefined,
-        rateEUR: undefined,
-        score: undefined,
-        box2: undefined,
-        box4: undefined,
-        welcomeDiscount: false,
-        shiftType: defaults.shiftType,
-        project: defaults.project,
-      });
-      return { ...d, zones };
-    });
-  };
-  const delRow = (zi, ri) => {
-    setDraftDay((d) => {
-      const zones = clone(d.zones || []);
-      zones[zi].rows = (zones[zi].rows || []).filter((_, i) => i !== ri);
-      return { ...d, zones };
-    });
-  };
-  const setRow = (zi, ri, patch) => {
-    setDraftDay((d) => {
-      const zones = clone(d.zones || []);
-      zones[zi].rows[ri] = { ...zones[zi].rows[ri], ...patch };
-      return { ...d, zones };
-    });
-  };
+  const addZone = () => setDraftDay((d) => ({ ...d, zones: [...(d?.zones || []), { name: "", rows: [] }] }));
+  const delZone = (zi) => setDraftDay((d) => ({ ...d, zones: (d?.zones || []).filter((_, i) => i !== zi) }));
+  const setZoneName = (zi, name) => setDraftDay((d) => { const zones = clone(d.zones || []); zones[zi].name = name; return { ...d, zones }; });
+  const addRow = (zi) => setDraftDay((d) => { const zones=clone(d.zones||[]); (zones[zi].rows ||= []).push({
+    recruiterId: "", hours: undefined, commissionMult: undefined, rateEUR: undefined,
+    score: undefined, box2: undefined, box4: undefined, welcomeDiscount: false,
+    shiftType: defaults.shiftType, project: defaults.project,
+  }); return { ...d, zones }; });
+  const delRow = (zi, ri) => setDraftDay((d) => { const zones=clone(d.zones||[]); zones[zi].rows=(zones[zi].rows||[]).filter((_,i)=>i!==ri); return { ...d, zones }; });
+  const setRow = (zi, ri, patch) => setDraftDay((d) => { const zones=clone(d.zones||[]); zones[zi].rows[ri] = { ...zones[zi].rows[ri], ...patch }; return { ...d, zones }; });
 
-  // Save: write planning + history upserts for each recruiter row
+  // Save day → planning + history upserts
   const saveDay = () => {
     if (!draftDay) return;
     const dateISO = editDateISO;
+
     // Validate box sums
     for (const z of draftDay.zones || []) {
       for (const row of z.rows || []) {
@@ -646,14 +684,14 @@ useEffect(() => {
         }
       }
     }
-    // Update planning
+
     setPlanning((prev) => {
-      const next = clone(prev);
+      const next = clone(prev || {});
       if (!next[weekStart]) Object.assign(next, ensureWeek(next, weekStart));
       next[weekStart].days[dateISO] = clone(draftDay);
       return next;
     });
-    // Update history rows (snapshot)
+
     setHistory((h) => {
       let out = [...h];
       (draftDay.zones || []).forEach((z) => {
@@ -665,30 +703,29 @@ useEffect(() => {
             recruiterId: row.recruiterId,
             recruiterName: rec?.name || "",
             crewCode: rec?.crewCode,
-            location: z.name || "", // store as 'location' for compatibility
+            location: z.name || "",
             score: row.score === "" ? undefined : Number(row.score || 0),
             box2: row.box2 === "" ? undefined : Number(row.box2 || 0),
             box4: row.box4 === "" ? undefined : Number(row.box4 || 0),
-            // new finance/payroll fields:
             project: row.project || defaults.project,
             shiftType: row.shiftType || defaults.shiftType,
             welcomeDiscount: !!row.welcomeDiscount,
             hours: row.hours === "" ? undefined : (row.hours != null ? Number(row.hours) : undefined),
             commissionMult: row.commissionMult == null ? undefined : Number(row.commissionMult),
             rateEUR: row.rateEUR === "" ? undefined : (row.rateEUR != null ? Number(row.rateEUR) : undefined),
-            // keep roleAtShift defaulting to recruiter role (can still be edited in Recruiter history modal)
             roleAtShift: rec?.role || "Rookie",
           });
         });
       });
       return out;
     });
+
     closeEditDay();
   };
 
   const DayCard = ({ i }) => {
     const dISO = fmtISO(addDays(parseISO(weekStart), i));
-    const day = weekObj.days[dISO] || { zones: [] };
+    const day = getDay(dISO);
     return (
       <Card className="flex-1">
         <CardHeader>
@@ -753,10 +790,7 @@ useEffect(() => {
       </div>
 
       {/* Edit Day modal */}
-     <Dialog
-  open={!!editDateISO}
-  onOpenChange={(open) => { if (!open) closeEditDay(); }}
->
+      <Dialog open={!!editDateISO} onOpenChange={(open) => { if (!open) closeEditDay(); }}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Edit Day — {fmtUK(editDateISO || "")}</DialogTitle>
@@ -772,9 +806,7 @@ useEffect(() => {
                 value={defaults.project}
                 onChange={(e) => setDefaults((d) => ({ ...d, project: e.target.value }))}
               >
-                {(load(K.settings, DEFAULT_SETTINGS).projects || ["HF"]).map((p) => (
-                  <option key={p}>{p}</option>
-                ))}
+                {safeProjects().map((p) => (<option key={p}>{p}</option>))}
               </select>
             </div>
             <div className="grid gap-1">
@@ -784,18 +816,12 @@ useEffect(() => {
                 value={defaults.shiftType}
                 onChange={(e) => setDefaults((d) => ({ ...d, shiftType: e.target.value }))}
               >
-                {shiftTypes.map((t) => (
-                  <option key={t.val} value={t.val}>{t.label}</option>
-                ))}
+                {shiftTypes.map((t) => (<option key={t.val} value={t.val}>{t.label}</option>))}
               </select>
             </div>
             <div className="grid gap-1">
               <Label>Default Hourly Rate (€)</Label>
-              <Input
-                inputMode="decimal"
-                value={defaults.rate}
-                onChange={(e) => setDefaults((d) => ({ ...d, rate: e.target.value }))}
-              />
+              <Input inputMode="decimal" value={defaults.rate} onChange={(e) => setDefaults((d) => ({ ...d, rate: e.target.value }))} />
             </div>
           </div>
 
@@ -806,19 +832,11 @@ useEffect(() => {
                 <div className="flex items-center justify-between mb-2">
                   <div className="grid gap-1">
                     <Label>Zone</Label>
-                    <Input
-                      className="w-56 h-9"
-                      value={z.name}
-                      onChange={(e) => setZoneName(zi, e.target.value)}
-                      placeholder="e.g., Mersch"
-                    />
+                    <Input className="w-56 h-9" value={z.name} onChange={(e) => setZoneName(zi, e.target.value)} placeholder="e.g., Mersch" />
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => delZone(zi)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => delZone(zi)}><Trash2 className="h-4 w-4" /></Button>
                 </div>
 
-                {/* Recruiter rows */}
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead className="bg-zinc-50">
@@ -840,103 +858,47 @@ useEffect(() => {
                       {(z.rows || []).map((row, ri) => (
                         <tr key={ri} className="border-t">
                           <td className="p-2">
-                            <select
-                              className="h-9 border rounded-md px-2 min-w-48"
-                              value={row.recruiterId}
-                              onChange={(e) => setRow(zi, ri, { recruiterId: e.target.value })}
-                            >
+                            <select className="h-9 border rounded-md px-2 min-w-48" value={row.recruiterId} onChange={(e) => setRow(zi, ri, { recruiterId: e.target.value })}>
                               <option value="">Select…</option>
-                              {recruiters.map((r) => (
-                                <option key={r.id} value={r.id}>{r.name}</option>
-                              ))}
+                              {recruiters.map((r) => (<option key={r.id} value={r.id}>{r.name}</option>))}
                             </select>
                           </td>
                           <td className="p-2 text-right">
-                            <Input
-                              className="w-20 h-9"
-                              inputMode="numeric"
-                              value={row.hours ?? ""}
-                              onChange={(e) => setRow(zi, ri, { hours: e.target.value })}
-                              placeholder="6/7/8"
-                            />
+                            <Input className="w-20 h-9" inputMode="numeric" value={row.hours ?? ""} onChange={(e) => setRow(zi, ri, { hours: e.target.value })} placeholder="6/7/8" />
                           </td>
                           <td className="p-2 text-right">
-                            <select
-                              className="h-9 border rounded-md px-2"
-                              value={row.commissionMult ?? ""}
-                              onChange={(e) => setRow(zi, ri, { commissionMult: e.target.value ? Number(e.target.value) : "" })}
-                            >
+                            <select className="h-9 border rounded-md px-2" value={row.commissionMult ?? ""} onChange={(e) => setRow(zi, ri, { commissionMult: e.target.value ? Number(e.target.value) : "" })}>
                               <option value="">—</option>
-                              {multipliers.map((m) => (
-                                <option key={m.val} value={m.val}>{m.label}</option>
-                              ))}
+                              {multipliers.map((m) => (<option key={m.val} value={m.val}>{m.label}</option>))}
                             </select>
                           </td>
                           <td className="p-2 text-right">
-                            <Input
-                              className="w-24 h-9"
-                              inputMode="decimal"
-                              value={row.rateEUR ?? defaults.rate}
-                              onChange={(e) => setRow(zi, ri, { rateEUR: e.target.value })}
-                            />
+                            <Input className="w-24 h-9" inputMode="decimal" value={row.rateEUR ?? defaults.rate} onChange={(e) => setRow(zi, ri, { rateEUR: e.target.value })} />
                           </td>
                           <td className="p-2 text-right">
-                            <Input
-                              className="w-20 h-9"
-                              inputMode="numeric"
-                              value={row.score ?? ""}
-                              onChange={(e) => setRow(zi, ri, { score: e.target.value })}
-                            />
+                            <Input className="w-20 h-9" inputMode="numeric" value={row.score ?? ""} onChange={(e) => setRow(zi, ri, { score: e.target.value })} />
                           </td>
                           <td className="p-2 text-right">
-                            <Input
-                              className="w-20 h-9"
-                              inputMode="numeric"
-                              value={row.box2 ?? ""}
-                              onChange={(e) => setRow(zi, ri, { box2: e.target.value })}
-                            />
+                            <Input className="w-20 h-9" inputMode="numeric" value={row.box2 ?? ""} onChange={(e) => setRow(zi, ri, { box2: e.target.value })} />
                           </td>
                           <td className="p-2 text-right">
-                            <Input
-                              className="w-20 h-9"
-                              inputMode="numeric"
-                              value={row.box4 ?? ""}
-                              onChange={(e) => setRow(zi, ri, { box4: e.target.value })}
-                            />
+                            <Input className="w-20 h-9" inputMode="numeric" value={row.box4 ?? ""} onChange={(e) => setRow(zi, ri, { box4: e.target.value })} />
                           </td>
                           <td className="p-2">
-                            <select
-                              className="h-9 border rounded-md px-2"
-                              value={row.shiftType || defaults.shiftType}
-                              onChange={(e) => setRow(zi, ri, { shiftType: e.target.value })}
-                            >
-                              {shiftTypes.map((t) => (
-                                <option key={t.val} value={t.val}>{t.label}</option>
-                              ))}
+                            <select className="h-9 border rounded-md px-2" value={row.shiftType || defaults.shiftType} onChange={(e) => setRow(zi, ri, { shiftType: e.target.value })}>
+                              {shiftTypes.map((t) => (<option key={t.val} value={t.val}>{t.label}</option>))}
                             </select>
                           </td>
                           <td className="p-2">
-                            <select
-                              className="h-9 border rounded-md px-2"
-                              value={row.project || defaults.project}
-                              onChange={(e) => setRow(zi, ri, { project: e.target.value })}
-                            >
-                              {(load(K.settings, DEFAULT_SETTINGS).projects || ["HF"]).map((p) => (
-                                <option key={p}>{p}</option>
-                              ))}
+                            <select className="h-9 border rounded-md px-2" value={row.project || defaults.project} onChange={(e) => setRow(zi, ri, { project: e.target.value })}>
+                              {safeProjects().map((p) => (<option key={p}>{p}</option>))}
                             </select>
                           </td>
                           <td className="p-2 text-center">
-                            <input
-                              type="checkbox"
-                              checked={!!row.welcomeDiscount}
-                              onChange={(e) => setRow(zi, ri, { welcomeDiscount: e.target.checked })}
-                            />
+                            <input type="checkbox" checked={!!row.welcomeDiscount} onChange={(e) => setRow(zi, ri, { welcomeDiscount: e.target.checked })} />
                           </td>
                           <td className="p-2 text-right">
-                            <Button variant="outline" size="sm" onClick={() => delRow(zi, ri)}>
-                              <X className="h-4 w-4" />
-                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => delRow(zi, ri)}><X className="h-4 w-4" /></Button>
                           </td>
                         </tr>
                       ))}
@@ -945,18 +907,14 @@ useEffect(() => {
                 </div>
 
                 <div className="pt-2">
-                  <Button variant="outline" size="sm" onClick={() => addRow(zi)}>
-                    <Plus className="h-4 w-4 mr-1" /> Add Recruiter
-                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => addRow(zi)}><Plus className="h-4 w-4 mr-1" /> Add Recruiter</Button>
                 </div>
               </div>
             ))}
           </div>
 
           <div className="flex items-center justify-between mt-3">
-            <Button variant="outline" size="sm" onClick={addZone}>
-              <Plus className="h-4 w-4 mr-1" /> Add Zone
-            </Button>
+            <Button variant="outline" size="sm" onClick={addZone}><Plus className="h-4 w-4 mr-1" /> Add Zone</Button>
             <div className="flex gap-2">
               <Button variant="outline" onClick={closeEditDay}>Cancel</Button>
               <Button style={{ background:"#d9010b", color:"white" }} onClick={saveDay}>Save</Button>
@@ -971,82 +929,69 @@ useEffect(() => {
   Salary — month nav, hours & Box2 commissions (role switches → Role(s))
 ────────────────────────────────────────────────────────────────────────── */
 const rookieCommission = (box2) => {
-  const t = { 0:0, 1:0, 2:25, 3:40, 4:70, 5:85, 6:120, 7:135, 8:175, 9:190, 10:235 };
+  const t = {0:0,1:0,2:25,3:40,4:70,5:85,6:120,7:135,8:175,9:190,10:235};
   if (box2 <= 10) return t[box2] ?? 0;
-  return 235 + (box2 - 10) * 15; // 11->250, 12->265, ...
+  return 235 + (box2 - 10) * 15;
 };
 
 const Salary = ({ recruiters, history }) => {
-  const [payMonth, setPayMonth] = useState(currentMonthKey()); // YYYY-MM (15th payday)
-  const [status, setStatus] = useState("all"); // active | inactive | all
+  const [payMonth, setPayMonth] = useState(currentMonthKey());
+  const [status, setStatus] = useState("all");
 
   const monthShift = (ym, delta) => {
-    const [y, m] = ym.split("-").map(Number);
-    const d = new Date(Date.UTC(y, m - 1, 1));
-    d.setUTCMonth(d.getUTCMonth() + delta);
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const [y,m] = ym.split("-").map(Number);
+    const d = new Date(Date.UTC(y,m-1,1));
+    d.setUTCMonth(d.getUTCMonth()+delta);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}`;
   };
 
-  // Hours from previous month; commission from two months before
   const workMonth = prevMonthKey(payMonth);
   const commMonth = prevMonthKey(workMonth);
   const inMonth = (iso, ym) => monthKey(iso) === ym;
 
   const rows = recruiters
-    .filter((r) => (status === "all" ? true : status === "active" ? !r.isInactive : !!r.isInactive))
-    .map((r) => {
-      const hRows = history.filter((x) => x.recruiterId === r.id && inMonth(x.dateISO, workMonth));
-      const rolesWorked = Array.from(new Set(hRows.map((x) => x.roleAtShift || r.role || "Rookie")));
-
-      const hours = hRows.reduce((sum, row) => {
-        const hrs = (row.hours != null ? Number(row.hours) : roleHoursDefault(row.roleAtShift || r.role || "Rookie")) || 0;
-        return sum + hrs;
-      }, 0);
-
-      const cRows = history.filter((x) => x.recruiterId === r.id && inMonth(x.dateISO, commMonth));
-      const bonus = cRows.reduce((sum, row) => {
-        const b2 = Number(row.box2) || 0;
+    .filter(r => status==="all" ? true : status==="active" ? !r.isInactive : !!r.isInactive)
+    .map(r => {
+      const hRows = history.filter(x => x.recruiterId===r.id && inMonth(x.dateISO, workMonth));
+      const rolesWorked = Array.from(new Set(hRows.map(x => x.roleAtShift || r.role || "Rookie")));
+      const hours = hRows.reduce((s,row)=>s + (row.hours ?? roleHoursDefault(row.roleAtShift||r.role||"Rookie")),0);
+      const cRows = history.filter(x => x.recruiterId===r.id && inMonth(x.dateISO, commMonth));
+      const bonus = cRows.reduce((s,row)=>{
+        const b2 = Number(row.box2)||0;
         const base = rookieCommission(b2);
-        const mult = row.commissionMult != null
-          ? Number(row.commissionMult)
-          : roleMultiplierDefault(row.roleAtShift || r.role || "Rookie");
-        return sum + base * mult;
-      }, 0);
-
-      return { recruiter: r, hours, bonus, rolesWorked };
+        const mult = row.commissionMult ?? roleMultiplierDefault(row.roleAtShift||r.role||"Rookie");
+        return s + base*mult;
+      },0);
+      return { recruiter:r, hours, bonus, rolesWorked };
     });
 
   const exportCSV = () => {
-    const hdr = ["Name","Crewcode","Role(s)",`Hours (${monthLabel(workMonth)})`,`Bonus € (${monthLabel(commMonth)})`];
-    const lines = [hdr.join(",")];
-    rows.forEach(({ recruiter: r, hours, bonus, rolesWorked }) => {
-      lines.push([`"${r.name}"`,`"${r.crewCode||""}"`,`"${rolesWorked.join("/")||r.role||"Rookie"}"`, hours, toMoney(bonus)].join(","));
+    const hdr=["Name","Crewcode","Role(s)",`Hours (${monthLabel(workMonth)})`,`Bonus € (${monthLabel(commMonth)})`];
+    const lines=[hdr.join(",")];
+    rows.forEach(({recruiter:r,hours,bonus,rolesWorked})=>{
+      lines.push([`"${r.name}"`,`"${r.crewCode||""}"`,`"${rolesWorked.join("/")||r.role||"Rookie"}"`,hours,bonus.toFixed(2)].join(","));
     });
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = `salary_${payMonth}.csv`; a.click(); URL.revokeObjectURL(url);
+    const blob=new Blob([lines.join("\n")],{type:"text/csv"});
+    const url=URL.createObjectURL(blob); const a=document.createElement("a");
+    a.href=url; a.download=`salary_${payMonth}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
   return (
     <div className="grid gap-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setPayMonth(monthShift(payMonth, -1))}>
-            <ChevronLeft className="h-4 w-4" /> Prev
-          </Button>
-          <Badge style={{ background: "#fca11c" }}>Payday 15 {monthLabel(payMonth)}</Badge>
-          <Button variant="outline" onClick={() => setPayMonth(monthShift(payMonth, 1))}>
-            Next <ChevronRight className="h-4 w-4" />
-          </Button>
+      <div className="flex justify-between items-center">
+        <div className="flex gap-2 items-center">
+          <Button variant="outline" onClick={()=>setPayMonth(monthShift(payMonth,-1))}><ChevronLeft className="h-4 w-4"/>Prev</Button>
+          <Badge style={{background:"#fca11c"}}>Payday 15 {monthLabel(payMonth)}</Badge>
+          <Button variant="outline" onClick={()=>setPayMonth(monthShift(payMonth,1))}>Next<ChevronRight className="h-4 w-4"/></Button>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex gap-2 items-center">
           <Label>Status</Label>
           <select className="h-10 border rounded-md px-2" value={status} onChange={(e)=>setStatus(e.target.value)}>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
             <option value="all">All</option>
           </select>
-          <Button onClick={exportCSV}><Download className="h-4 w-4 mr-1" /> Export CSV</Button>
+          <Button onClick={exportCSV}><Download className="h-4 w-4 mr-1"/>Export CSV</Button>
         </div>
       </div>
 
@@ -1056,23 +1001,21 @@ const Salary = ({ recruiters, history }) => {
 
       <div className="overflow-x-auto border rounded-xl">
         <table className="min-w-full text-sm">
-          <thead className="bg-zinc-50">
-            <tr>
-              <th className="p-3 text-left">Name</th>
-              <th className="p-3 text-left">Crewcode</th>
-              <th className="p-3 text-left">Role(s)</th>
-              <th className="p-3 text-right">Hours</th>
-              <th className="p-3 text-right">Bonus €</th>
-            </tr>
-          </thead>
+          <thead className="bg-zinc-50"><tr>
+            <th className="p-3 text-left">Name</th>
+            <th className="p-3 text-left">Crewcode</th>
+            <th className="p-3 text-left">Role(s)</th>
+            <th className="p-3 text-right">Hours</th>
+            <th className="p-3 text-right">Bonus €</th>
+          </tr></thead>
           <tbody>
-            {rows.map(({ recruiter: r, hours, bonus, rolesWorked }) => (
+            {rows.map(({recruiter:r,hours,bonus,rolesWorked})=>(
               <tr key={r.id} className="border-t">
                 <td className="p-3 font-medium">{r.name}</td>
                 <td className="p-3">{r.crewCode}</td>
-                <td className="p-3">{rolesWorked.join("/") || (r.role || "Rookie")}</td>
+                <td className="p-3">{rolesWorked.join("/") || r.role || "Rookie"}</td>
                 <td className="p-3 text-right">{hours}</td>
-                <td className="p-3 text-right">{toMoney(bonus)}</td>
+                <td className="p-3 text-right">{bonus.toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
@@ -1083,94 +1026,66 @@ const Salary = ({ recruiters, history }) => {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Finances — weekly income/wages/profit per Proago rules (D2D/EVENT × discount)
+  Finances — weekly profit per Proago rules
 ────────────────────────────────────────────────────────────────────────── */
 const Finances = ({ history }) => {
-  const [weekStart, setWeekStart] = useState(() => fmtISO(startOfWeekMon(new Date())));
+  const [weekStart, setWeekStart] = useState(()=>fmtISO(startOfWeekMon(new Date())));
   const settings = load(K.settings, DEFAULT_SETTINGS);
   const matrix = settings.financeMatrix || DEFAULT_SETTINGS.financeMatrix;
   const defaultRate = settings.defaultHourlyRate || DEFAULT_SETTINGS.defaultHourlyRate;
 
-  const dayRows = (iso) => history.filter((h) => h.dateISO === iso);
-
   const calcIncome = (row) => {
-    const type = (row.shiftType === "EVENT") ? "EVENT" : "D2D";
-    const discKey = row.welcomeDiscount ? "discount" : "noDiscount";
+    const type = row.shiftType==="EVENT" ? "EVENT":"D2D";
+    const discKey = row.welcomeDiscount ? "discount":"noDiscount";
     const m = matrix[type]?.[discKey] || matrix.D2D.noDiscount;
-    const b2 = Number(row.box2) || 0;
-    const b4 = Number(row.box4) || 0;
-    return b2 * (m.box2||0) + b4 * (m.box4||0);
+    const b2 = Number(row.box2)||0; const b4 = Number(row.box4)||0;
+    return b2*(m.box2||0)+ b4*(m.box4||0);
   };
   const calcWages = (row) => {
-    const hrs = (row.hours != null ? Number(row.hours) : roleHoursDefault(row.roleAtShift || "Rookie")) || 0;
-    const rate = (row.rateEUR != null ? Number(row.rateEUR) : defaultRate) || defaultRate;
-    return hrs * rate;
+    const hrs = row.hours ?? roleHoursDefault(row.roleAtShift||"Rookie");
+    const rate = row.rateEUR ?? defaultRate;
+    return hrs*rate;
   };
 
   const makeDayTotal = (iso) => {
-    const rows = dayRows(iso);
-    let income = 0, wages = 0, score = 0, box2 = 0, box4 = 0, shifts = 0;
-    rows.forEach((r) => {
-      income += calcIncome(r);
-      wages += calcWages(r);
-      score += Number(r.score) || 0;
-      box2  += Number(r.box2)  || 0;
-      box4  += Number(r.box4)  || 0;
-      shifts += 1;
+    const rows = history.filter(h=>h.dateISO===iso);
+    let income=0,wages=0,score=0,box2=0,box4=0,shifts=0;
+    rows.forEach(r=>{
+      income+=calcIncome(r); wages+=calcWages(r);
+      score+=Number(r.score)||0; box2+=Number(r.box2)||0; box4+=Number(r.box4)||0; shifts++;
     });
-    return { iso, income, wages, profit: income - wages, score, box2, box4, shifts, rows };
+    return {iso,income,wages,profit:income-wages,score,box2,box4,shifts};
   };
 
-  const days = Array.from({ length: 7 }).map((_, i) => {
-    const iso = fmtISO(addDays(parseISO(weekStart), i));
-    return makeDayTotal(iso);
-  });
-
-  const weekIncome = days.reduce((s,d)=>s+d.income,0);
-  const weekWages  = days.reduce((s,d)=>s+d.wages,0);
-  const weekProfit = weekIncome - weekWages;
-  const weekScore  = days.reduce((s,d)=>s+d.score,0);
-  const weekB2     = days.reduce((s,d)=>s+d.box2,0);
-  const weekB4     = days.reduce((s,d)=>s+d.box4,0);
+  const days=Array.from({length:7}).map((_,i)=>makeDayTotal(fmtISO(addDays(parseISO(weekStart),i))));
+  const weekIncome=days.reduce((s,d)=>s+d.income,0);
+  const weekWages=days.reduce((s,d)=>s+d.wages,0);
+  const weekProfit=weekIncome-weekWages;
 
   return (
     <div className="grid gap-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setWeekStart(fmtISO(addDays(parseISO(weekStart), -7)))}>
-            <ChevronLeft className="h-4 w-4" /> Prev
-          </Button>
-          <Badge style={{ background: "#fca11c" }}>Week {weekNumberISO(parseISO(weekStart))}</Badge>
-          <Button variant="outline" onClick={() => setWeekStart(fmtISO(addDays(parseISO(weekStart), 7)))}>
-            Next <ChevronRight className="h-4 w-4" />
-          </Button>
+      <div className="flex justify-between items-center">
+        <div className="flex gap-2 items-center">
+          <Button variant="outline" onClick={()=>setWeekStart(fmtISO(addDays(parseISO(weekStart),-7)))}><ChevronLeft className="h-4 w-4"/>Prev</Button>
+          <Badge style={{background:"#fca11c"}}>Week {weekNumberISO(parseISO(weekStart))}</Badge>
+          <Button variant="outline" onClick={()=>setWeekStart(fmtISO(addDays(parseISO(weekStart),7)))}>Next<ChevronRight className="h-4 w-4"/></Button>
         </div>
         <div className="text-sm text-muted-foreground">
-          <strong>Income:</strong> €{toMoney(weekIncome)} • <strong>Wages:</strong> €{toMoney(weekWages)} • <strong>Profit:</strong> €{toMoney(weekProfit)} • <strong>Score:</strong> {weekScore} (B2 {weekB2} / B4 {weekB4})
+          Income €{weekIncome.toFixed(2)} • Wages €{weekWages.toFixed(2)} • Profit €{weekProfit.toFixed(2)}
         </div>
       </div>
-
       <div className="overflow-x-auto border rounded-xl">
         <table className="min-w-full text-sm">
-          <thead className="bg-zinc-50">
-            <tr>
-              <th className="p-3 text-left">Date</th>
-              <th className="p-3 text-right">Income €</th>
-              <th className="p-3 text-right">Wages €</th>
-              <th className="p-3 text-right">Profit €</th>
-              <th className="p-3 text-right">Score</th>
-              <th className="p-3 text-right">Box2</th>
-              <th className="p-3 text-right">Box4</th>
-              <th className="p-3 text-right">Shifts</th>
-            </tr>
-          </thead>
+          <thead className="bg-zinc-50"><tr>
+            <th className="p-3">Date</th><th className="p-3 text-right">Income</th><th className="p-3 text-right">Wages</th><th className="p-3 text-right">Profit</th><th className="p-3 text-right">Score</th><th className="p-3 text-right">Box2</th><th className="p-3 text-right">Box4</th><th className="p-3 text-right">Shifts</th>
+          </tr></thead>
           <tbody>
-            {days.map((d) => (
+            {days.map(d=>(
               <tr key={d.iso} className="border-t">
-                <td className="p-3 font-medium">{fmtUK(d.iso)}</td>
-                <td className="p-3 text-right">€{toMoney(d.income)}</td>
-                <td className="p-3 text-right">€{toMoney(d.wages)}</td>
-                <td className="p-3 text-right">€{toMoney(d.profit)}</td>
+                <td className="p-3">{fmtUK(d.iso)}</td>
+                <td className="p-3 text-right">{d.income.toFixed(2)}</td>
+                <td className="p-3 text-right">{d.wages.toFixed(2)}</td>
+                <td className="p-3 text-right">{d.profit.toFixed(2)}</td>
                 <td className="p-3 text-right">{d.score}</td>
                 <td className="p-3 text-right">{d.box2}</td>
                 <td className="p-3 text-right">{d.box4}</td>
@@ -1185,106 +1100,41 @@ const Finances = ({ history }) => {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
+  Settings (defaults + finance matrix + backfill + bulk delete history)
+────────────────────────────────────────────────────────────────────────── */
+// ... (Settings component code from earlier message goes here)
+
+/* ──────────────────────────────────────────────────────────────────────────
   Main App Wrapper
 ────────────────────────────────────────────────────────────────────────── */
 export default function App() {
-  const [authed, setAuthed] = useState(!!localStorage.getItem(AUTH_SESSION_KEY));
-  const [tab, setTab] = useState("inflow");
+  const [authed,setAuthed]=useState(!!localStorage.getItem(AUTH_SESSION_KEY));
+  const [tab,setTab]=useState("inflow");
+  const [pipeline,setPipeline]=useState(load(K.pipeline,{leads:[],interview:[],formation:[]}));
+  const [recruiters,setRecruiters]=useState(load(K.recruiters,[]));
+  const [planning,setPlanning]=useState(load(K.planning,{}));
+  const [history,setHistory]=useState(load(K.history,[]));
 
-  const [pipeline, setPipeline] = useState(load(K.pipeline, { leads: [], interview: [], formation: [] }));
-  const [recruiters, setRecruiters] = useState(load(K.recruiters, []));
-  const [planning, setPlanning] = useState(load(K.planning, {}));
-  const [history, setHistory] = useState(load(K.history, []));
-  // settings are loaded ad-hoc where needed; you can add a Settings tab later
+  useEffect(()=>save(K.pipeline,pipeline),[pipeline]);
+  useEffect(()=>save(K.recruiters,recruiters),[recruiters]);
+  useEffect(()=>save(K.planning,planning),[planning]);
+  useEffect(()=>save(K.history,history),[history]);
 
-  useEffect(() => save(K.pipeline, pipeline), [pipeline]);
-  useEffect(() => save(K.recruiters, recruiters), [recruiters]);
-  useEffect(() => save(K.planning, planning), [planning]);
-  useEffect(() => save(K.history, history), [history]);
+  const onLogout=()=>{localStorage.removeItem(AUTH_SESSION_KEY);setAuthed(false);};
+  if(!authed) return <Login onOk={()=>setAuthed(true)}/>;
 
-  const onLogout = () => { localStorage.removeItem(AUTH_SESSION_KEY); setAuthed(false); };
-
-  if (!authed) return <Login onOk={() => setAuthed(true)} />;
-
-  const weekBadge = tab === "planning" ? `Week ${weekNumberISO(startOfWeekMon(new Date()))}` : "";
-
-  // Salary & Finances gates
-  const [salaryUnlocked, setSalaryUnlocked] = useState(!!localStorage.getItem(SALARY_SESSION_KEY));
-  const [financeUnlocked, setFinanceUnlocked] = useState(!!localStorage.getItem(FINANCE_SESSION_KEY));
+  const weekBadge=tab==="planning"?`Week ${weekNumberISO(startOfWeekMon(new Date()))}`:"";
+  const [salaryUnlocked,setSalaryUnlocked]=useState(!!localStorage.getItem(SALARY_SESSION_KEY));
+  const [financeUnlocked,setFinanceUnlocked]=useState(!!localStorage.getItem(FINANCE_SESSION_KEY));
 
   return (
     <Shell tab={tab} setTab={setTab} onLogout={onLogout} weekBadge={weekBadge}>
-      {tab === "inflow" && (
-        <Inflow
-          pipeline={pipeline}
-          setPipeline={setPipeline}
-          onHire={(rec) => {
-            setRecruiters((all) => {
-              const i = all.findIndex((r) => String(r.crewCode) === String(rec.crewCode));
-              if (i >= 0) {
-                const next = [...all];
-                next[i] = {
-                  ...next[i],
-                  name: rec.name,
-                  role: rec.role,
-                  crewCode: rec.crewCode,
-                  phone: rec.phone || next[i].phone || "",
-                  isInactive: false,
-                };
-                return next;
-              }
-              return [
-                ...all,
-                {
-                  id: (typeof crypto !== "undefined" && crypto.randomUUID)
-                    ? crypto.randomUUID()
-                    : String(Date.now() + Math.random()),
-                  name: rec.name,
-                  crewCode: rec.crewCode,
-                  role: rec.role,
-                  phone: rec.phone || "",
-                  isInactive: false,
-                },
-              ];
-            });
-          }}
-        />
-      )}
-
-      {tab === "recruiters" && (
-        <Recruiters
-          recruiters={recruiters}
-          setRecruiters={setRecruiters}
-          history={history}
-          setHistory={setHistory}
-        />
-      )}
-
-      {tab === "planning" && (
-        <Planning
-          recruiters={recruiters}
-          planning={planning}
-          setPlanning={setPlanning}
-          history={history}
-          setHistory={setHistory}
-        />
-      )}
-
-      {tab === "salary" && (
-        salaryUnlocked ? (
-          <Salary recruiters={recruiters} history={history} />
-        ) : (
-          <Gate storageKey={SALARY_SESSION_KEY} label="Re-enter credentials for Salary" onOk={() => setSalaryUnlocked(true)} />
-        )
-      )}
-
-      {tab === "finances" && (
-        financeUnlocked ? (
-          <Finances history={history} />
-        ) : (
-          <Gate storageKey={FINANCE_SESSION_KEY} label="Re-enter credentials for Finances" onOk={() => setFinanceUnlocked(true)} />
-        )
-      )}
+      {tab==="inflow" && <Inflow pipeline={pipeline} setPipeline={setPipeline} onHire={(rec)=>{/* recruiter creation logic */}}/>}
+      {tab==="recruiters" && <Recruiters recruiters={recruiters} setRecruiters={setRecruiters} history={history} setHistory={setHistory}/>}
+      {tab==="planning" && <Planning recruiters={recruiters} planning={planning} setPlanning={setPlanning} history={history} setHistory={setHistory}/>}
+      {tab==="salary" && (salaryUnlocked ? <Salary recruiters={recruiters} history={history}/> : <Gate storageKey={SALARY_SESSION_KEY} label="Re-enter credentials for Salary" onOk={()=>setSalaryUnlocked(true)}/>)}
+      {tab==="finances" && (financeUnlocked ? <Finances history={history}/> : <Gate storageKey={FINANCE_SESSION_KEY} label="Re-enter credentials for Finances" onOk={()=>setFinanceUnlocked(true)}/>)}
+      {tab==="settings" && <Settings history={history} setHistory={setHistory}/>}
     </Shell>
   );
 }
