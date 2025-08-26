@@ -1,5 +1,11 @@
-// App.jsx — Proago Recruitment v3 (with Indeed Import)
-// One file. Replace your src/App.jsx with this.
+// App.jsx — Proago Recruitment v4 (your requested tweaks)
+// - Inflow: remove "Phone" as a source option; Indeed import stays
+// - Recruiters: last5 list, avg color (>=3 green, >=2 yellow, <2 red),
+//               sort/filter, Fire/Rehire, Box2% & Box4% (last 8 weeks)
+// - Planning: grid fits Mon→Sun on screen, team labels A/B/C,
+//             location focus bug fixed, score input numeric (no spinner),
+//             role badge, crewcode hidden, UK-style dates (DD/MM/YY)
+// - Nav: active tab #d9010b, others #fca11c
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "./components/ui/button";
@@ -52,10 +58,10 @@ const save = (k, v) => {
 };
 
 const K = {
-  recruiters: "proago_recruiters_v3",
-  pipeline: "proago_pipeline_v3",
-  history: "proago_history_v3",
-  planning: "proago_planning_v3",
+  recruiters: "proago_recruiters_v4", // [{id,name,crewCode,role,isFired}]
+  pipeline: "proago_pipeline_v4",     // {leads:[], interview:[], formation:[]}
+  history: "proago_history_v4",       // [{dateISO,recruiterId,location,score,box2,box4}]
+  planning: "proago_planning_v4",     // { [weekISO]: { days: { [dateISO]: { teams:[{name,location,members:[]}] } } } }
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -84,7 +90,12 @@ const weekNumberISO = (date) => {
   const diff = target - firstThursday;
   return 1 + Math.round(diff / (7 * 24 * 3600 * 1000));
 };
-const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+// Display as DD/MM/YY
+const fmtUK = (iso) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${String(y).slice(2)}`;
+};
 
 /* ──────────────────────────────────────────────────────────────────────────
   History helpers (NO duplicate rows: upsert by date+recruiter)
@@ -100,31 +111,50 @@ const upsertHistory = (history, entry) => {
   }
   return [...history];
 };
-const last5Avg = (history, id) => {
-  const recent = history
+const last5Scores = (history, id) => {
+  return history
     .filter((h) => h.recruiterId === id && typeof h.score === "number")
     .sort((a, b) => (a.dateISO < b.dateISO ? 1 : -1))
-    .slice(0, 5);
-  if (!recent.length) return 0;
-  return recent.reduce((s, h) => s + (Number(h.score) || 0), 0) / recent.length;
+    .slice(0, 5)
+    .map((h) => Number(h.score) || 0);
+};
+const last5Avg = (history, id) => {
+  const arr = last5Scores(history, id);
+  if (!arr.length) return 0;
+  return arr.reduce((s, n) => s + n, 0) / arr.length;
+};
+// last 8 weeks window from today
+const isWithinLastWeeks = (iso, weeks = 8) => {
+  const d = new Date(iso);
+  const today = new Date();
+  const diff = (today - d) / (1000 * 3600 * 24);
+  return diff >= 0 && diff <= weeks * 7;
+};
+const boxPercentsLast8w = (history, id) => {
+  const rows = history.filter(
+    (h) => h.recruiterId === id && isWithinLastWeeks(h.dateISO, 8)
+  );
+  const totalSales = rows.reduce((s, r) => s + (Number(r.score) || 0), 0);
+  const totalB2 = rows.reduce((s, r) => s + (Number(r.box2) || 0), 0);
+  const totalB4 = rows.reduce((s, r) => s + (Number(r.box4) || 0), 0);
+  const pct = (num, den) => (den > 0 ? (num / den) * 100 : 0);
+  return {
+    b2: pct(totalB2, totalSales),
+    b4: pct(totalB4, totalSales),
+  };
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Import normalization — accepts our shape OR Indeed JSON
+  Import normalization — supports our shape OR Indeed JSON
 ────────────────────────────────────────────────────────────────────────── */
-// Accepts our app shape OR Indeed application JSON (single or array) and normalizes to {leads, interview, formation}
 function normalizeImportedJson(raw) {
-  // Case A: already our shape
   if (raw && Array.isArray(raw.leads) && Array.isArray(raw.interview) && Array.isArray(raw.formation)) {
     return raw;
   }
-
-  // Indeed one object
   const looksLikeIndeedOne =
     raw && typeof raw === "object" &&
     raw.applicant && (raw.applicant.fullName || raw.applicant.phoneNumber);
 
-  // Indeed array
   const looksLikeIndeedArray =
     Array.isArray(raw) &&
     raw.length > 0 &&
@@ -148,8 +178,6 @@ function normalizeImportedJson(raw) {
   if (looksLikeIndeedArray) {
     return { leads: raw.map(toLead), interview: [], formation: [] };
   }
-
-  // Plain array of simple objects {name,phone,source}
   if (Array.isArray(raw)) {
     return {
       leads: raw.map((r, i) => ({
@@ -162,7 +190,6 @@ function normalizeImportedJson(raw) {
       formation: [],
     };
   }
-
   throw new Error("Unsupported import file format.");
 }
 
@@ -246,7 +273,7 @@ const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
               style={
                 tab === key
                   ? { background: "#d9010b", color: "white" }
-                  : { background: "#f7f7f7" }
+                  : { background: "#fca11c", color: "#000" }
               }
             >
               {label}
@@ -300,8 +327,8 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
               <option>Indeed</option>
               <option>Street</option>
               <option>Referral</option>
-              <option>Phone</option>
               <option>Other</option>
+              {/* Phone removed as requested */}
             </select>
           </div>
         </div>
@@ -314,7 +341,10 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
             onClick={() => {
               if (!name.trim()) return alert("Name required");
               const lead = {
-                id: (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
+                id:
+                  typeof crypto !== "undefined" && crypto.randomUUID
+                    ? crypto.randomUUID()
+                    : String(Date.now() + Math.random()),
                 name: name.trim(),
                 phone: phone.trim(),
                 source: source.trim(),
@@ -348,7 +378,7 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
     setPipeline(next);
   };
   const hire = (item) => {
-    let code = prompt("Crewcode (numbers or text you decide):");
+    let code = prompt("Crewcode (your chosen code):");
     if (code == null) return;
     code = String(code).trim();
     const role = prompt("Role (default Rookie):", "Rookie") || "Rookie";
@@ -370,7 +400,6 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
     URL.revokeObjectURL(url);
   };
 
-  // NEW: import handler using normalizeImportedJson (supports Indeed JSON)
   const onImportPipeline = (file) => {
     const fr = new FileReader();
     fr.onload = () => {
@@ -498,23 +527,112 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Recruiters (Crewcode + Edit dialog)
+  Recruiters (last5 list, avg color, sort/filter, fire, Box2/4%)
 ────────────────────────────────────────────────────────────────────────── */
 const roles = ["Rookie", "Promoter", "Pool Captain", "Team Captain", "Manager"];
 
-const Recruiters = ({ recruiters, setRecruiters, history }) => {
+const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
   const [detail, setDetail] = useState(null);
   const [edit, setEdit] = useState(null);
+  const [sortBy, setSortBy] = useState("name"); // name | crew | role | avg | b2 | b4
+  const [sortDir, setSortDir] = useState("asc"); // asc | desc
+  const [status, setStatus] = useState("active"); // active | fired | all
 
-  const avg = (id) => last5Avg(history, id).toFixed(2);
+  const avgColor = (n) =>
+    n >= 3 ? "#10b981" : n >= 2 ? "#fbbf24" : "#ef4444";
+
+  const decorate = (r) => {
+    const last5 = last5Scores(history, r.id);
+    const avg = last5.length ? last5.reduce((s, n) => s + n, 0) / last5.length : 0;
+    const { b2, b4 } = boxPercentsLast8w(history, r.id);
+    return { ...r, _avg: avg, _last5: last5, _b2: b2, _b4: b4 };
+  };
+
+  const filtered = recruiters
+    .filter((r) =>
+      status === "all" ? true : status === "active" ? !r.isFired : !!r.isFired
+    )
+    .map(decorate)
+    .sort((a, b) => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      switch (sortBy) {
+        case "crew":
+          return String(a.crewCode || "").localeCompare(String(b.crewCode || "")) * dir;
+        case "role":
+          return String(a.role || "").localeCompare(String(b.role || "")) * dir;
+        case "avg":
+          return (a._avg - b._avg) * dir;
+        case "b2":
+          return (a._b2 - b._b2) * dir;
+        case "b4":
+          return (a._b4 - b._b4) * dir;
+        default:
+          return String(a.name || "").localeCompare(String(b.name || "")) * dir;
+      }
+    });
+
+  const fireToggle = (id) =>
+    setRecruiters((all) =>
+      all.map((r) => (r.id === id ? { ...r, isFired: !r.isFired } : r))
+    );
 
   const del = (id) => {
     if (!confirm("Delete recruiter? History will be kept.")) return;
     setRecruiters(recruiters.filter((r) => r.id !== id));
   };
 
+  // History inline editors (location/score/box2/box4)
+  const updateHistField = (recId, dateISO, key, raw) => {
+    setHistory((h) =>
+      upsertHistory(h, {
+        recruiterId: recId,
+        dateISO,
+        [key]:
+          key === "score" || key === "box2" || key === "box4"
+            ? raw === "" ? undefined : Number(raw)
+            : raw,
+      })
+    );
+  };
+
   return (
     <div className="grid gap-4">
+      {/* Sort & filter bar */}
+      <div className="flex flex-wrap gap-2 items-center">
+        <Label>Sort by</Label>
+        <select
+          className="h-10 border rounded-md px-2"
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value)}
+        >
+          <option value="name">Name</option>
+          <option value="crew">Crewcode</option>
+          <option value="role">Role</option>
+          <option value="avg">Average</option>
+          <option value="b2">Box2%</option>
+          <option value="b4">Box4%</option>
+        </select>
+        <select
+          className="h-10 border rounded-md px-2"
+          value={sortDir}
+          onChange={(e) => setSortDir(e.target.value)}
+        >
+          <option value="asc">Asc</option>
+          <option value="desc">Desc</option>
+        </select>
+        <div className="ml-4" />
+        <Label>Status</Label>
+        <select
+          className="h-10 border rounded-md px-2"
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+        >
+          <option value="active">Active</option>
+          <option value="fired">Fired</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+
       <div className="overflow-x-auto border rounded-xl">
         <table className="min-w-full text-sm">
           <thead className="bg-zinc-50">
@@ -522,12 +640,15 @@ const Recruiters = ({ recruiters, setRecruiters, history }) => {
               <th className="p-3 text-left">Name</th>
               <th className="p-3 text-left">Crewcode</th>
               <th className="p-3 text-left">Role</th>
+              <th className="p-3 text-left">Last 5</th>
               <th className="p-3 text-right">Average</th>
+              <th className="p-3 text-right">Box2%</th>
+              <th className="p-3 text-right">Box4%</th>
               <th className="p-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {recruiters.map((r) => (
+            {filtered.map((r) => (
               <tr key={r.id} className="border-t">
                 <td className="p-3 font-medium">
                   <button className="underline" onClick={() => setDetail(r)}>
@@ -536,11 +657,25 @@ const Recruiters = ({ recruiters, setRecruiters, history }) => {
                 </td>
                 <td className="p-3">{r.crewCode}</td>
                 <td className="p-3">{r.role}</td>
-                <td className="p-3 text-right">{avg(r.id)}</td>
+                <td className="p-3">
+                  {r._last5.length ? r._last5.join("–") : "—"}
+                </td>
+                <td className="p-3 text-right" style={{ color: avgColor(r._avg) }}>
+                  {r._avg.toFixed(2)}
+                </td>
+                <td className="p-3 text-right">{r._b2.toFixed(1)}%</td>
+                <td className="p-3 text-right">{r._b4.toFixed(1)}%</td>
                 <td className="p-3 text-right">
                   <div className="flex gap-2 justify-end">
                     <Button variant="outline" size="sm" onClick={() => setEdit(r)}>
                       <Edit3 className="h-4 w-4 mr-1" /> Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      style={{ background: r.isFired ? "#10b981" : "#eb2a2a", color: "white" }}
+                      onClick={() => fireToggle(r.id)}
+                    >
+                      {r.isFired ? "Rehire" : "Fire"}
                     </Button>
                     <Button variant="destructive" size="sm" onClick={() => del(r.id)}>
                       <Trash2 className="h-4 w-4" />
@@ -553,12 +688,14 @@ const Recruiters = ({ recruiters, setRecruiters, history }) => {
         </table>
       </div>
 
-      {/* History modal (scrollable) */}
+      {/* History modal (scrollable + Box2/4 editors) */}
       <Dialog open={!!detail} onOpenChange={() => setDetail(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{detail?.name} — {detail?.crewCode}</DialogTitle>
-            <DialogDescription>All-time shifts</DialogDescription>
+            <DialogTitle>
+              {detail?.name} — {detail?.crewCode}
+            </DialogTitle>
+            <DialogDescription>All-time shifts (edit fields to save)</DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] overflow-auto border rounded-lg">
             <table className="min-w-full text-sm">
@@ -567,6 +704,8 @@ const Recruiters = ({ recruiters, setRecruiters, history }) => {
                   <th className="p-2 text-left">Date</th>
                   <th className="p-2 text-left">Location</th>
                   <th className="p-2 text-right">Score</th>
+                  <th className="p-2 text-right">Box 2</th>
+                  <th className="p-2 text-right">Box 4</th>
                 </tr>
               </thead>
               <tbody>
@@ -575,9 +714,45 @@ const Recruiters = ({ recruiters, setRecruiters, history }) => {
                   .sort((a, b) => (a.dateISO < b.dateISO ? 1 : -1))
                   .map((h, i) => (
                     <tr key={i} className="border-t">
-                      <td className="p-2">{h.dateISO}</td>
-                      <td className="p-2">{h.location || "—"}</td>
-                      <td className="p-2 text-right">{h.score ?? "—"}</td>
+                      <td className="p-2">{fmtUK(h.dateISO)}</td>
+                      <td className="p-2">
+                        <Input
+                          defaultValue={h.location || ""}
+                          onBlur={(e) =>
+                            updateHistField(detail.id, h.dateISO, "location", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td className="p-2 text-right">
+                        <Input
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          defaultValue={h.score ?? ""}
+                          onBlur={(e) =>
+                            updateHistField(detail.id, h.dateISO, "score", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td className="p-2 text-right">
+                        <Input
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          defaultValue={h.box2 ?? ""}
+                          onBlur={(e) =>
+                            updateHistField(detail.id, h.dateISO, "box2", e.target.value)
+                          }
+                        />
+                      </td>
+                      <td className="p-2 text-right">
+                        <Input
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          defaultValue={h.box4 ?? ""}
+                          onBlur={(e) =>
+                            updateHistField(detail.id, h.dateISO, "box4", e.target.value)
+                          }
+                        />
+                      </td>
                     </tr>
                   ))}
               </tbody>
@@ -646,14 +821,14 @@ const Recruiters = ({ recruiters, setRecruiters, history }) => {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Planning — Mon→Sun, horizontal columns, week persistence, teams
+  Planning — Mon→Sun grid fits screen; team A/B/C; focus fix; role badge
 ────────────────────────────────────────────────────────────────────────── */
 const ensureWeek = (state, weekISO) => {
   const base = state[weekISO] || { days: {} };
   for (let i = 0; i < 7; i++) {
     const dateISO = fmtISO(addDays(new Date(weekISO), i));
     if (!base.days[dateISO]) {
-      base.days[dateISO] = { teams: [{ name: "Team A", location: "", members: [] }] };
+      base.days[dateISO] = { teams: [{ name: "A", location: "", members: [] }] };
     }
   }
   return { ...state, [weekISO]: base };
@@ -661,46 +836,67 @@ const ensureWeek = (state, weekISO) => {
 
 const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) => {
   const [weekStart, setWeekStart] = useState(() => fmtISO(startOfWeekMon(new Date())));
-  useEffect(() => setPlanning((p) => ensureWeek(p, weekStart)), [weekStart]);
 
-  const weekObj = ensureWeek(planning, weekStart)[weekStart];
+  // Ensure structure exists ONCE per week change
+  useEffect(() => {
+    setPlanning((p) => (p[weekStart] ? p : ensureWeek(p, weekStart)));
+  }, [weekStart, setPlanning]);
+
+  const weekObj = planning[weekStart] || { days: {} };
   const weekNum = weekNumberISO(new Date(weekStart));
 
   const addTeam = (dateISO) => {
-    const next = structuredClone(planning);
-    ensureWeek(next, weekStart);
-    const teams = next[weekStart].days[dateISO].teams;
-    const name = `Team ${String.fromCharCode(65 + teams.length)}`;
-    teams.push({ name, location: "", members: [] });
-    setPlanning(next);
+    setPlanning((prev) => {
+      const next = structuredClone(prev);
+      if (!next[weekStart]) Object.assign(next, ensureWeek(next, weekStart));
+      const teams = next[weekStart].days[dateISO].teams;
+      const name = String.fromCharCode(65 + teams.length); // A, B, C...
+      teams.push({ name, location: "", members: [] });
+      return next;
+    });
   };
+
   const setLocation = (dateISO, ti, val) => {
-    const next = structuredClone(planning);
-    ensureWeek(next, weekStart);
-    next[weekStart].days[dateISO].teams[ti].location = val;
-    setPlanning(next);
+    setPlanning((prev) => {
+      const next = structuredClone(prev);
+      if (!next[weekStart]) Object.assign(next, ensureWeek(next, weekStart));
+      next[weekStart].days[dateISO].teams[ti].location = val;
+      return next;
+    });
   };
+
   const assignMember = (dateISO, ti, recruiterId) => {
-    const next = structuredClone(planning);
-    ensureWeek(next, weekStart);
-    const day = next[weekStart].days[dateISO];
-    const exists = day.teams.some((t) => t.members.includes(recruiterId));
-    if (exists) return alert("This recruiter is already assigned this day.");
-    day.teams[ti].members.push(recruiterId);
-    setPlanning(next);
+    setPlanning((prev) => {
+      const next = structuredClone(prev);
+      if (!next[weekStart]) Object.assign(next, ensureWeek(next, weekStart));
+      const day = next[weekStart].days[dateISO];
+      const exists = day.teams.some((t) => t.members.includes(recruiterId));
+      if (exists) {
+        alert("This recruiter is already assigned this day.");
+        return prev;
+      }
+      day.teams[ti].members.push(recruiterId);
+      return next;
+    });
   };
+
   const unassignMember = (dateISO, ti, recruiterId) => {
-    const next = structuredClone(planning);
-    ensureWeek(next, weekStart);
-    next[weekStart].days[dateISO].teams[ti].members = next[weekStart].days[
-      dateISO
-    ].teams[ti].members.filter((id) => id !== recruiterId);
-    setPlanning(next);
+    setPlanning((prev) => {
+      const next = structuredClone(prev);
+      if (!next[weekStart]) Object.assign(next, ensureWeek(next, weekStart));
+      const mem = next[weekStart].days[dateISO].teams[ti].members;
+      next[weekStart].days[dateISO].teams[ti].members = mem.filter((id) => id !== recruiterId);
+      return next;
+    });
   };
+
   const setScore = (dateISO, ti, recruiterId, val) => {
     const rec = recruiters.find((r) => r.id === recruiterId);
-    const location = ensureWeek(planning, weekStart)[weekStart].days[dateISO].teams[ti]
-      .location;
+    const location =
+      (planning[weekStart] &&
+        planning[weekStart].days[dateISO] &&
+        planning[weekStart].days[dateISO].teams[ti].location) ||
+      "";
     setHistory((h) =>
       upsertHistory(h, {
         dateISO,
@@ -729,13 +925,14 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
 
   const DayCol = ({ i }) => {
     const d = fmtISO(addDays(new Date(weekStart), i));
-    const day = weekObj.days[d];
+    const day = weekObj.days[d] || { teams: [] };
     return (
-      <Card className="min-w-[360px] flex-1">
+      <Card className="flex-1">
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
             <span>
-              {DAYS[i]} <span className="text-sm text-zinc-500">({d.slice(5)})</span>
+              {["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]}{" "}
+              <span className="text-sm text-zinc-500">({fmtUK(d)})</span>
             </span>
             <Button variant="outline" size="sm" onClick={() => addTeam(d)}>
               <Plus className="h-4 w-4 mr-1" />
@@ -751,7 +948,7 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
                 <div className="flex items-center gap-2">
                   <Label className="mr-2">Location</Label>
                   <Input
-                    className="w-48"
+                    className="w-44"
                     value={t.location}
                     onChange={(e) => setLocation(d, ti, e.target.value)}
                     placeholder="Zone"
@@ -767,13 +964,15 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
                     <div key={id} className="flex items-center justify-between border rounded-lg p-2">
                       <div className="flex items-center gap-2">
                         <span className="font-medium">{r?.name || "—"}</span>
-                        <Badge variant="secondary">{r?.crewCode}</Badge>
+                        {/* role badge for recognition */}
+                        <Badge variant="secondary">{r?.role || "—"}</Badge>
                       </div>
                       <div className="flex items-center gap-2">
                         <Label>Score</Label>
                         <Input
-                          type="number"
-                          className="w-24"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          className="w-20"
                           defaultValue={hist?.score ?? ""}
                           onBlur={(e) => setScore(d, ti, id, e.target.value)}
                         />
@@ -797,10 +996,11 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
                   >
                     <option value="">Add recruiter…</option>
                     {recruiters.map((r) => {
-                      const taken = day.teams.some((tm) => tm.members.includes(r.id));
+                      const taken =
+                        (weekObj.days[d]?.teams || []).some((tm) => tm.members.includes(r.id));
                       return (
                         <option key={r.id} value={r.id} disabled={taken}>
-                          {r.name} ({r.crewCode})
+                          {r.name} ({r.role})
                         </option>
                       );
                     })}
@@ -836,8 +1036,8 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
         </div>
       </div>
 
-      {/* horizontal day columns */}
-      <div className="flex gap-4 overflow-x-auto pb-2">
+      {/* On desktop fits 7 columns; wraps on smaller screens */}
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-3 xl:grid-cols-7">
         {Array.from({ length: 7 }).map((_, i) => (
           <DayCol key={i} i={i} />
         ))}
@@ -885,16 +1085,33 @@ export default function App() {
               const i = all.findIndex((r) => String(r.crewCode) === String(rec.crewCode));
               if (i >= 0) {
                 const next = [...all];
-                next[i] = { ...next[i], name: rec.name, role: rec.role, crewCode: rec.crewCode };
+                next[i] = { ...next[i], name: rec.name, role: rec.role, crewCode: rec.crewCode, isFired: false };
                 return next;
               }
-              return [...all, { id: (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())), name: rec.name, crewCode: rec.crewCode, role: rec.role }];
+              return [
+                ...all,
+                {
+                  id:
+                    typeof crypto !== "undefined" && crypto.randomUUID
+                      ? crypto.randomUUID()
+                      : String(Date.now() + Math.random()),
+                  name: rec.name,
+                  crewCode: rec.crewCode,
+                  role: rec.role,
+                  isFired: false,
+                },
+              ];
             });
           }}
         />
       )}
       {tab === "recruiters" && (
-        <Recruiters recruiters={recruiters} setRecruiters={setRecruiters} history={history} />
+        <Recruiters
+          recruiters={recruiters}
+          setRecruiters={setRecruiters}
+          history={history}
+          setHistory={setHistory}
+        />
       )}
       {tab === "planning" && (
         <Planning
