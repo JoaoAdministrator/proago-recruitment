@@ -1,3 +1,5 @@
+// Proago CRM — App.jsx (v2025-08-26 build: planning/finances/salary fixes + strict phone prefixes)
+
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
@@ -8,8 +10,14 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "./components/ui/dialog";
 import {
-  Download, Upload, Trash2, ChevronLeft, ChevronRight, UserPlus, Edit3, Plus, X, Lock,
+  Download, Upload, Trash2, ChevronLeft, ChevronRight, UserPlus, Edit3, Plus, X, Lock, ChevronDown
 } from "lucide-react";
+
+/* ──────────────────────────────────────────────────────────────────────────
+  App data/version (one-time reset to kill ghost data)
+────────────────────────────────────────────────────────────────────────── */
+const DATA_VERSION = "proago_v7_reset_2025_08_26";
+const VERSION_KEY = "proago_data_version";
 
 /* ──────────────────────────────────────────────────────────────────────────
   Auth (persist with localStorage)
@@ -30,11 +38,11 @@ const clone = typeof structuredClone === "function"
   : (obj) => JSON.parse(JSON.stringify(obj));
 
 const K = {
-  recruiters: "proago_recruiters_v6",   // + contract
+  recruiters: "proago_recruiters_v6",
   pipeline: "proago_pipeline_v5",
-  history: "proago_history_v5",         // per-recruiter per-day, extended by Planning
-  planning: "proago_planning_v5",       // legacy teams; now zones; we migrate on the fly
-  settings: "proago_settings_v1",       // defaults + finance matrix
+  history: "proago_history_v5",
+  planning: "proago_planning_v5",
+  settings: "proago_settings_v1",
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -72,16 +80,56 @@ const monthKey = (iso) => iso.slice(0,7);
 const currentMonthKey = () => { const d=new Date(); return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}`; };
 const prevMonthKey = (ym) => { const [Y,M]=ym.split("-").map(Number); const d=new Date(Date.UTC(Y,M-1,1)); d.setUTCMonth(d.getUTCMonth()-1); return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}`; };
 const monthLabel = (ym) => { const [y,m]=ym.split("-").map(Number); return new Date(Date.UTC(y,m-1,1)).toLocaleDateString(undefined,{month:"short",year:"numeric",timeZone:"UTC"}); };
-const toMoney = (n) => (Number(n||0)).toFixed(2);
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Roles, hours, multipliers (editable per shift)
+  Roles, hours, multipliers
 ────────────────────────────────────────────────────────────────────────── */
 const ROLES = ["Rookie", "Promoter", "Pool Captain", "Team Captain", "Sales Manager"];
 const roleHoursDefault = (role) =>
   role==="Pool Captain" ? 7 : (role==="Team Captain"||role==="Sales Manager") ? 8 : 6;
 const roleMultiplierDefault = (role) =>
   role==="Pool Captain" ? 1.25 : role==="Team Captain" ? 1.5 : role==="Sales Manager" ? 2.0 : 1.0;
+
+/* ──────────────────────────────────────────────────────────────────────────
+  Phone/name normalization + flags (STRICT prefixes)
+────────────────────────────────────────────────────────────────────────── */
+const FLAG_BY_CC = { "+352":"🇱🇺", "+33":"🇫🇷", "+32":"🇧🇪", "+49":"🇩🇪" };
+const ALLOWED_CCS = Object.keys(FLAG_BY_CC);
+
+const titleCase = (s="") =>
+  s.trim()
+   .toLowerCase()
+   .replace(/\s+/g," ")
+   .split(" ")
+   .map(w => w ? w[0].toUpperCase()+w.slice(1) : "")
+   .join(" ");
+
+const normalizeDigits = (raw="") => raw.replace(/[()\-\.\s]/g,"").replace(/^00/,"+");
+
+const detectCC = (raw="") => {
+  const s = normalizeDigits(raw);
+  const cc = ALLOWED_CCS.find(cc => s.startsWith(cc));
+  return cc || "";
+};
+
+const formatPhoneByCountry = (raw="") => {
+  let s = normalizeDigits(raw);
+  if(!s.startsWith("+")) return { display:"", flag:"", cc:"", ok:false }; // must start with +
+  const cc = detectCC(s);
+  if (!cc) return { display:"", flag:"", cc:"", ok:false }; // reject
+  const flag = FLAG_BY_CC[cc] || "";
+  let rest = s.slice(cc.length);
+  // spacing rules
+  if (cc === "+352") { // LU
+    rest = rest.replace(/^(\d{3})(\d{3})(\d{3})$/,"$1 $2 $3")
+               .replace(/^(\d{3})(\d{2})(\d{3})$/,"$1 $2 $3");
+  } else if (cc === "+33" || cc === "+32") { // FR/BE: 2s
+    rest = rest.replace(/(\d{2})(?=\d)/g,"$1 ").trim();
+  } else if (cc === "+49") { // DE: 3-3- rest
+    rest = rest.replace(/^(\d{3})(\d{3})(\d{3,})$/,"$1 $2 $3");
+  }
+  return { display: `${cc} ${rest}`.trim(), flag, cc, ok:true };
+};
 
 /* ──────────────────────────────────────────────────────────────────────────
   Settings (defaults + finance matrix)
@@ -100,6 +148,8 @@ const DEFAULT_SETTINGS = {
     },
   },
 };
+
+const toMoney = (n) => (Number(n||0)).toFixed(2);
 
 /* ──────────────────────────────────────────────────────────────────────────
   History helpers (upsert; last5; Box2/4% in last 8 weeks)
@@ -136,46 +186,36 @@ const boxPercentsLast8w = (history, id) => {
 
 /* ──────────────────────────────────────────────────────────────────────────
   Import normalization — supports our shape OR Indeed JSON
+  (Title Case names + STRICT phone prefixes, rejects invalid)
 ────────────────────────────────────────────────────────────────────────── */
 function normalizeImportedJson(raw) {
-  if (raw && Array.isArray(raw.leads) && Array.isArray(raw.interview) && Array.isArray(raw.formation)) {
-    return raw;
-  }
-  const looksLikeIndeedOne =
-    raw && typeof raw === "object" && raw.applicant &&
-    (raw.applicant.fullName || raw.applicant.phoneNumber);
-  const looksLikeIndeedArray =
-    Array.isArray(raw) && raw.length>0 && raw[0] &&
-    raw[0].applicant && (raw[0].applicant.fullName || raw[0].applicant.phoneNumber);
-
-  const toLead = (obj) => {
-    const a = obj.applicant || {};
-    const name = (a.fullName || "").trim();
-    const phone = (a.phoneNumber || "").toString().replace(/\s+/g," ").trim();
+  const shapeLead = (r,i)=> {
+    const name = titleCase(r.name || r.applicant?.fullName || "");
+    const phoneRaw = r.phone || r.applicant?.phoneNumber || "";
+    const norm = formatPhoneByCountry(phoneRaw);
+    if (!norm.ok) throw new Error("Found invalid phone prefix in import (only +352/+33/+32/+49 allowed).");
     return {
-      id: `lead_${
-        obj.id ||
-        (typeof crypto!=="undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random()))
-      }`,
-      name, phone, source: "Indeed",
+      id: r.id || `lead_${i}_${Date.now()}`,
+      name,
+      phone: norm.display,
+      flag: norm.flag,
+      source: (r.source || "Indeed"),
     };
   };
-
-  if (looksLikeIndeedOne) return { leads: [toLead(raw)], interview: [], formation: [] };
-  if (looksLikeIndeedArray) return { leads: raw.map(toLead), interview: [], formation: [] };
-
-  if (Array.isArray(raw)) {
+  if (raw && Array.isArray(raw.leads) && Array.isArray(raw.interview) && Array.isArray(raw.formation)) {
     return {
-      leads: raw.map((r,i)=>({
-        id: r.id || `lead_${i}_${Date.now()}`,
-        name: r.name || "",
-        phone: r.phone || "",
-        source: r.source || "Import",
-      })),
-      interview: [],
-      formation: [],
+      leads: raw.leads.map(shapeLead),
+      interview: raw.interview.map(shapeLead),
+      formation: raw.formation.map(shapeLead)
     };
   }
+  const looksLikeIndeedOne = raw && typeof raw === "object" && raw.applicant && (raw.applicant.fullName || raw.applicant.phoneNumber);
+  const looksLikeIndeedArray = Array.isArray(raw) && raw.length>0 && raw[0]?.applicant && (raw[0].applicant.fullName || raw[0].applicant.phoneNumber);
+
+  if (looksLikeIndeedOne) return { leads: [shapeLead(raw,0)], interview: [], formation: [] };
+  if (looksLikeIndeedArray) return { leads: raw.map(shapeLead), interview: [], formation: [] };
+
+  if (Array.isArray(raw)) return { leads: raw.map(shapeLead), interview: [], formation: [] };
   throw new Error("Unsupported import file format.");
 }
 
@@ -237,7 +277,7 @@ const CredentialDialog = ({ open, label = "Confirm with credentials", onCancel, 
   };
   return (
     <Dialog open={open} onOpenChange={() => onCancel?.()}>
-      <DialogContent>
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{label}</DialogTitle>
           <DialogDescription>Enter your Proago credentials to continue.</DialogDescription>
@@ -262,19 +302,17 @@ const CredentialDialog = ({ open, label = "Confirm with credentials", onCancel, 
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Shell (tabs + header)
+  Shell (Proago CRM in the top row; Settings like Logout)
 ────────────────────────────────────────────────────────────────────────── */
 const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
   <div className="min-h-screen">
     <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
       <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <img
-            src="/proago-icon.png"
-            alt="Proago"
-            className="h-7 w-7 rounded-full"
-            onError={(e)=> (e.currentTarget.style.display = "none")}
-          />
+          <img src="/proago-icon.png" alt="Proago" className="h-7 w-7 rounded-full"
+               onError={(e)=> (e.currentTarget.style.display = "none")} />
+          <span className="font-semibold text-lg" style={{ fontFamily:"Lora,serif" }}>Proago CRM</span>
+          {weekBadge && <Badge variant="secondary" className="ml-3">{weekBadge}</Badge>}
         </div>
         <nav className="flex gap-2">
           {[
@@ -283,7 +321,6 @@ const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
             ["planning","Planning"],
             ["salary","Salary"],
             ["finances","Finances"],
-            ["settings","Settings"],
           ].map(([key,label])=>(
             <Button
               key={key}
@@ -292,19 +329,17 @@ const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
               style={ tab===key ? { background:"#d9010b", color:"white" } : { background:"#fca11c", color:"#000" } }
             >{label}</Button>
           ))}
+          <Button variant="ghost" onClick={()=>setTab("settings")}>Settings</Button>
           <Button variant="ghost" onClick={onLogout}>Logout</Button>
         </nav>
-      </div>
-      <div className="mx-auto max-w-7xl px-4 pb-2">
-        <span className="font-semibold text-lg" style={{ fontFamily:"Lora,serif" }}>Proago CRM</span>
-        {weekBadge && <Badge variant="secondary" className="ml-3">{weekBadge}</Badge>}
       </div>
     </header>
     <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
   </div>
 );
+
 /* ──────────────────────────────────────────────────────────────────────────
-  Inflow (Pipeline) — with Indeed normalization
+  Inflow (Pipeline) — with STRICT prefixes + Title Case + Flags
 ────────────────────────────────────────────────────────────────────────── */
 const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
   const [name, setName] = useState("");
@@ -313,16 +348,20 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
 
   const reset = () => { setName(""); setPhone(""); setSource("Indeed"); };
 
+  const normalized = phone ? formatPhoneByCountry(phone) : {display:"",flag:"",ok:false};
   return (
     <Dialog open={open} onOpenChange={(v)=>{ reset(); onOpenChange(v); }}>
-      <DialogContent>
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>New Lead</DialogTitle>
           <DialogDescription>Only Name, Phone and Source are required.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
-          <div className="grid gap-1"><Label>Full name</Label><Input value={name} onChange={(e)=>setName(e.target.value)} /></div>
-          <div className="grid gap-1"><Label>Phone</Label><Input value={phone} onChange={(e)=>setPhone(e.target.value)} /></div>
+          <div className="grid gap-1"><Label>Full name</Label>
+            <Input value={name} onChange={(e)=>setName(e.target.value)} placeholder="e.g., Flandrina Melvin"/></div>
+          <div className="grid gap-1"><Label>Phone</Label>
+            <Input value={phone} onChange={(e)=>setPhone(e.target.value)} placeholder="+352 691 012 345"/></div>
+          <div className="text-sm text-zinc-600">{normalized.flag} {normalized.display}</div>
           <div className="grid gap-1">
             <Label>Source</Label>
             <select className="h-10 border rounded-md px-2" value={source} onChange={(e)=>setSource(e.target.value)}>
@@ -336,12 +375,16 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
         <DialogFooter>
           <Button variant="outline" onClick={()=>onOpenChange(false)}>Cancel</Button>
           <Button style={{background:"#d9010b",color:"white"}} onClick={()=>{
-            if(!name.trim()) return alert("Name required");
+            const nm = titleCase(name);
+            if(!nm) return alert("Name required");
+            const norm = formatPhoneByCountry(phone);
+            if(!norm.ok) return alert("Phone must start with +352, +33, +32 or +49.");
             const lead = {
               id: (crypto.randomUUID? crypto.randomUUID() : String(Date.now()+Math.random())),
-              name: name.trim(),
-              phone: phone.trim(),
-              source: source.trim()
+              name: nm,
+              phone: norm.display,
+              source: source.trim(),
+              flag: norm.flag
             };
             onSave(lead); onOpenChange(false);
           }}>Save</Button>
@@ -360,7 +403,10 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
   const hire=(item)=>{ let code=prompt("Crewcode:"); if(!code) return; const role=prompt("Role (default Rookie):","Rookie")||"Rookie"; onHire({...item, crewCode:code, role}); const next=clone(pipeline); next.formation=next.formation.filter(x=>x.id!==item.id); setPipeline(next); };
 
   const exportJSON=()=>{ const blob=new Blob([JSON.stringify(pipeline,null,2)],{type:"application/json"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="pipeline.json"; a.click(); URL.revokeObjectURL(url); };
-  const onImport=(file)=>{ const fr=new FileReader(); fr.onload=()=>{ try{ const data=JSON.parse(fr.result); const normalized=normalizeImportedJson(data); setPipeline(normalized); alert("Import done ✅"); }catch(err){ alert("Import failed: "+(err?.message||"Invalid file")); } }; fr.readAsText(file); };
+  const onImport=(file)=>{ const fr=new FileReader(); fr.onload=()=>{ try{
+      const data=JSON.parse(fr.result); const normalized=normalizeImportedJson(data);
+      setPipeline(normalized); alert("Import done ✅");
+    }catch(err){ alert("Import failed: "+(err?.message||"Invalid file")); } }; fr.readAsText(file); };
 
   const Column=({title,keyName,prev,nextKey,extra})=>(
     <Card className="border-2">
@@ -372,8 +418,8 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
             <tbody>
               {pipeline[keyName].map((x)=>(
                 <tr key={x.id} className="border-t">
-                  <td className="p-3 font-medium">{x.name}</td>
-                  <td className="p-3">{x.phone}</td>
+                  <td className="p-3 font-medium">{titleCase(x.name)}</td>
+                  <td className="p-3">{x.flag ? <span className="mr-1">{x.flag}</span> : null}{formatPhoneByCountry(x.phone).display}</td>
                   <td className="p-3">{x.source}</td>
                   <td className="p-3 flex gap-2 justify-end">
                     {prev && <Button size="sm" variant="outline" onClick={()=>move(x,keyName,prev)}>Back</Button>}
@@ -405,9 +451,8 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
     <AddLeadDialog open={addOpen} onOpenChange={setAddOpen} onSave={(lead)=>setPipeline((p)=>({...p,leads:[lead,...p.leads]}))}/>
   </div>);
 };
-
 /* ──────────────────────────────────────────────────────────────────────────
-  Recruiters (with last5, avg colors, Box2/Box4%, history editor, contract + delete)
+  Recruiters (with last5, avg colors, Box2/Box4%, history editor; location read-only)
 ────────────────────────────────────────────────────────────────────────── */
 const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
   const [detail, setDetail] = useState(null);
@@ -441,8 +486,9 @@ const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
     setRecruiters(recruiters.filter(r=>r.id!==id)); };
 
   const updateHistField=(recId,dateISO,key,raw)=>{
+    if (key==="location") return; // location is read-only here (change via Planning)
     setHistory((h)=> upsertHistory(h,{ recruiterId:recId, dateISO,
-      [key]: (["score","box2","box4"].includes(key)? (raw===""?undefined:Number(raw)) : raw)
+      [key]: (["score","box2","box4","hours","commissionMult"].includes(key)? (raw===""?undefined:Number(raw)) : raw)
     }));
   };
 
@@ -482,15 +528,17 @@ const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
 
     {/* History modal */}
     <Dialog open={!!detail} onOpenChange={()=>setDetail(null)}>
-      <DialogContent>
-        <DialogHeader><DialogTitle>{detail?.name} — {detail?.crewCode}</DialogTitle><DialogDescription>All-time shifts</DialogDescription></DialogHeader>
-        <div className="max-h-[60vh] overflow-auto border rounded-lg">
+      <DialogContent className="max-w-5xl">
+        <DialogHeader><DialogTitle>{detail?.name} — {detail?.crewCode}</DialogTitle><DialogDescription>All-time shifts (location read-only here)</DialogDescription></DialogHeader>
+        <div className="max-h-[70vh] overflow-auto border rounded-lg">
           <table className="min-w-full text-sm">
             <thead className="bg-zinc-50">
               <tr>
                 <th className="p-2 text-left">Date</th>
                 <th className="p-2 text-left">Role</th>
                 <th className="p-2 text-left">Location</th>
+                <th className="p-2 text-right">Hours</th>
+                <th className="p-2 text-right">Mult</th>
                 <th className="p-2 text-right">Score</th>
                 <th className="p-2 text-right">Box2</th>
                 <th className="p-2 text-right">Box4</th>
@@ -509,7 +557,11 @@ const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
                       {ROLES.map(r=><option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
-                  <td className="p-2"><Input defaultValue={h.location||""} onBlur={(e)=>updateHistField(detail.id,h.dateISO,"location",e.target.value)}/></td>
+                  <td className="p-2">
+                    <Input value={h.location||""} readOnly title="Edit location via Planning" />
+                  </td>
+                  <td className="p-2 text-right"><Input defaultValue={h.hours??""} inputMode="numeric" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"hours",e.target.value)}/></td>
+                  <td className="p-2 text-right"><Input defaultValue={h.commissionMult??""} inputMode="decimal" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"commissionMult",e.target.value)}/></td>
                   <td className="p-2 text-right"><Input defaultValue={h.score??""} inputMode="numeric" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"score",e.target.value)}/></td>
                   <td className="p-2 text-right"><Input defaultValue={h.box2??""} inputMode="numeric" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"box2",e.target.value)}/></td>
                   <td className="p-2 text-right"><Input defaultValue={h.box4??""} inputMode="numeric" onBlur={(e)=>updateHistField(detail.id,h.dateISO,"box4",e.target.value)}/></td>
@@ -536,7 +588,7 @@ const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
 
     {/* Edit recruiter */}
     <Dialog open={!!edit} onOpenChange={()=>setEdit(null)}>
-      <DialogContent>
+      <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Edit recruiter</DialogTitle></DialogHeader>
         <div className="grid gap-2">
           <Label>Name</Label><Input value={edit?.name||""} onChange={(e)=>setEdit({...edit,name:e.target.value})}/>
@@ -554,7 +606,7 @@ const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
         <DialogFooter>
           <Button variant="outline" onClick={()=>setEdit(null)}>Cancel</Button>
           <Button style={{background:"#d9010b",color:"white"}} onClick={()=>{
-            setRecruiters(all=>all.map(r=>r.id===edit.id?edit:r));
+            setRecruiters(all=>all.map(r=>r.id===edit.id?{...edit, name:titleCase(edit.name)}:r));
             setEdit(null);
           }}>Save</Button>
         </DialogFooter>
@@ -562,8 +614,12 @@ const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
     </Dialog>
   </div>);
 };
+
 /* ──────────────────────────────────────────────────────────────────────────
-  Planning — compact preview + Edit Day modal (defensive)
+  Planning — compact preview + Edit Day modal
+  - Zone has: name, project, shiftType
+  - Per recruiter row: recruiterId, hours, commissionMult, score, box2, box4
+  - Preview shows Score (colored like Recruiters) + Project
 ────────────────────────────────────────────────────────────────────────── */
 const ensureWeek = (state, weekISO) => {
   const safe = state && typeof state === "object" ? state : {};
@@ -573,24 +629,22 @@ const ensureWeek = (state, weekISO) => {
   for (let i = 0; i < 7; i++) {
     const dateISO = fmtISO(addDays(parseISO(weekISO), i));
     if (!base.days[dateISO]) {
-      base.days[dateISO] = { zones: [] }; // new structure
+      base.days[dateISO] = { zones: [] };
     } else {
       // migrate legacy day.teams -> zones if present
       const day = base.days[dateISO];
       if (day && Array.isArray(day.teams)) {
         const zones = (day.teams || []).map((t) => ({
           name: t?.location || "",
+          project: "HF",
+          shiftType: "D2D",
           rows: (t?.members || []).map((rid) => ({
             recruiterId: rid || "",
             hours: undefined,
             commissionMult: undefined,
-            rateEUR: undefined,
             score: undefined,
             box2: undefined,
             box4: undefined,
-            welcomeDiscount: false,
-            shiftType: "D2D",
-            project: "HF",
           })),
         }));
         base.days[dateISO] = { zones };
@@ -603,16 +657,10 @@ const ensureWeek = (state, weekISO) => {
 };
 
 const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) => {
-  // try/catch fallback UI (optional)
-  try {} catch(e){}
-
   const [weekStart, setWeekStart] = useState(() => fmtISO(startOfWeekMon(new Date())));
   const weekNum = weekNumberISO(parseISO(weekStart));
 
-  // Ensure structure when week changes and on mount
-  useEffect(() => {
-    setPlanning((p) => ensureWeek(p || {}, weekStart));
-  }, [weekStart, setPlanning]);
+  useEffect(() => { setPlanning((p) => ensureWeek(p || {}, weekStart)); }, [weekStart, setPlanning]);
 
   const getDay = (iso) => {
     const wk = planning?.[weekStart];
@@ -627,43 +675,29 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
   ];
   const shiftTypes = [{ label: "Door-to-Door", val: "D2D" }, { label: "Events", val: "EVENT" }];
 
-  const safeProjects = () => {
-    try {
-      const s = load(K.settings, DEFAULT_SETTINGS);
-      return Array.isArray(s?.projects) && s.projects.length ? s.projects : ["HF"];
-    } catch { return ["HF"]; }
-  };
-
   // Edit Day modal state
   const [editDateISO, setEditDateISO] = useState(null);
-  const [draftDay, setDraftDay] = useState(null); // { zones:[{name, rows:[...]}] }
-  const [defaults, setDefaults] = useState({
-    project: safeProjects()[0] || "HF",
-    shiftType: "D2D",
-    rate: (load(K.settings, DEFAULT_SETTINGS).defaultHourlyRate || 15.63),
-  });
+  const [draftDay, setDraftDay] = useState(null); // { zones:[{name, project, shiftType, rows:[...]}] }
 
   const openEditDay = (dateISO) => {
     const d = clone(getDay(dateISO));
+    // initialize defaults for new zones if empty
+    if (!d.zones || !d.zones.length) {
+      d.zones = [{ name: "Luxembourg, Gare", project: "HF", shiftType: "D2D", rows: [] }];
+    } else {
+      d.zones = d.zones.map(z => ({ project: "HF", shiftType: "D2D", ...z }));
+    }
     setEditDateISO(dateISO);
     setDraftDay(d);
-    const settings = load(K.settings, DEFAULT_SETTINGS);
-    setDefaults({
-      project: (settings.projects && settings.projects[0]) || "HF",
-      shiftType: "D2D",
-      rate: settings.defaultHourlyRate || 15.63,
-    });
   };
   const closeEditDay = () => { setEditDateISO(null); setDraftDay(null); };
 
   // Draft mutations
-  const addZone = () => setDraftDay((d) => ({ ...d, zones: [...(d?.zones || []), { name: "", rows: [] }] }));
+  const addZone = () => setDraftDay((d) => ({ ...d, zones: [...(d?.zones || []), { name: "Luxembourg, Gare", project: "HF", shiftType: "D2D", rows: [] }] }));
   const delZone = (zi) => setDraftDay((d) => ({ ...d, zones: (d?.zones || []).filter((_, i) => i !== zi) }));
-  const setZoneName = (zi, name) => setDraftDay((d) => { const zones = clone(d.zones || []); zones[zi].name = name; return { ...d, zones }; });
+  const setZoneField = (zi, patch) => setDraftDay((d) => { const zones = clone(d.zones || []); zones[zi] = { ...zones[zi], ...patch }; return { ...d, zones }; });
   const addRow = (zi) => setDraftDay((d) => { const zones=clone(d.zones||[]); (zones[zi].rows ||= []).push({
-    recruiterId: "", hours: undefined, commissionMult: undefined, rateEUR: undefined,
-    score: undefined, box2: undefined, box4: undefined, welcomeDiscount: false,
-    shiftType: defaults.shiftType, project: defaults.project,
+    recruiterId: "", hours: undefined, commissionMult: undefined, score: undefined, box2: undefined, box4: undefined,
   }); return { ...d, zones }; });
   const delRow = (zi, ri) => setDraftDay((d) => { const zones=clone(d.zones||[]); zones[zi].rows=(zones[zi].rows||[]).filter((_,i)=>i!==ri); return { ...d, zones }; });
   const setRow = (zi, ri, patch) => setDraftDay((d) => { const zones=clone(d.zones||[]); zones[zi].rows[ri] = { ...zones[zi].rows[ri], ...patch }; return { ...d, zones }; });
@@ -708,12 +742,10 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
             score: row.score === "" ? undefined : Number(row.score || 0),
             box2: row.box2 === "" ? undefined : Number(row.box2 || 0),
             box4: row.box4 === "" ? undefined : Number(row.box4 || 0),
-            project: row.project || defaults.project,
-            shiftType: row.shiftType || defaults.shiftType,
-            welcomeDiscount: !!row.welcomeDiscount,
+            project: z.project || "HF",
+            shiftType: z.shiftType || "D2D",
             hours: row.hours === "" ? undefined : (row.hours != null ? Number(row.hours) : undefined),
             commissionMult: row.commissionMult == null ? undefined : Number(row.commissionMult),
-            rateEUR: row.rateEUR === "" ? undefined : (row.rateEUR != null ? Number(row.rateEUR) : undefined),
             roleAtShift: rec?.role || "Rookie",
           });
         });
@@ -723,6 +755,8 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
 
     closeEditDay();
   };
+
+  const scoreColor = (v) => (v >= 3 ? "#10b981" : v >= 2 ? "#fbbf24" : "#ef4444");
 
   const DayCard = ({ i }) => {
     const dISO = fmtISO(addDays(parseISO(weekStart), i));
@@ -745,16 +779,19 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
             day.zones.map((z, zi) => (
               <div key={zi} className="border rounded-lg p-2">
                 <div className="text-xs uppercase text-zinc-500 mb-1">Zone</div>
-                <div className="font-medium mb-2">{z.name || "—"}</div>
+                <div className="font-medium mb-2">{z.name || "—"} <span className="text-xs text-zinc-600">• Project: {z.project || "HF"}</span></div>
                 {(z.rows || []).length > 0 ? (
                   <ul className="text-sm space-y-1">
                     {z.rows.map((row, ri) => {
                       const rec = rById(row.recruiterId);
-                      const sc = row.score ?? history.find(h => h.recruiterId===row.recruiterId && h.dateISO===dISO)?.score;
+                      const histRow = history.find(h => h.recruiterId===row.recruiterId && h.dateISO===dISO);
+                      const sc = row.score ?? histRow?.score;
                       return (
                         <li key={ri} className="flex items-center justify-between">
                           <span>{rec?.name || "Recruiter"}</span>
-                          <span className="text-zinc-600">{typeof sc === "number" ? sc : "—"}</span>
+                          <span className="text-zinc-600" style={{color: typeof sc==="number" ? scoreColor(Number(sc)) : undefined}}>
+                            {typeof sc === "number" ? sc : "—"}
+                          </span>
                         </li>
                       );
                     })}
@@ -792,50 +829,33 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
 
       {/* Edit Day modal */}
       <Dialog open={!!editDateISO} onOpenChange={(open) => { if (!open) closeEditDay(); }}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>Edit Day — {fmtUK(editDateISO || "")}</DialogTitle>
-            <DialogDescription>Add Zones and Recruiters. Values are saved per shift.</DialogDescription>
+            <DialogDescription>Add Zones and Recruiters. Values saved per shift; Zone holds Project & Type.</DialogDescription>
           </DialogHeader>
-
-          {/* Defaults for new rows */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-            <div className="grid gap-1">
-              <Label>Default Project</Label>
-              <select
-                className="h-9 border rounded-md px-2"
-                value={defaults.project}
-                onChange={(e) => setDefaults((d) => ({ ...d, project: e.target.value }))}
-              >
-                {safeProjects().map((p) => (<option key={p}>{p}</option>))}
-              </select>
-            </div>
-            <div className="grid gap-1">
-              <Label>Default Shift Type</Label>
-              <select
-                className="h-9 border rounded-md px-2"
-                value={defaults.shiftType}
-                onChange={(e) => setDefaults((d) => ({ ...d, shiftType: e.target.value }))}
-              >
-                {shiftTypes.map((t) => (<option key={t.val} value={t.val}>{t.label}</option>))}
-              </select>
-            </div>
-            <div className="grid gap-1">
-              <Label>Default Hourly Rate (€)</Label>
-              <Input inputMode="decimal" value={defaults.rate} onChange={(e) => setDefaults((d) => ({ ...d, rate: e.target.value }))} />
-            </div>
-          </div>
 
           {/* Zones list */}
           <div className="grid gap-3">
             {(draftDay?.zones || []).map((z, zi) => (
               <div key={zi} className="border rounded-xl p-3">
-                <div className="flex items-center justify-between mb-2">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-2">
                   <div className="grid gap-1">
                     <Label>Zone</Label>
-                    <Input className="w-56 h-9" value={z.name} onChange={(e) => setZoneName(zi, e.target.value)} placeholder="e.g., Mersch" />
+                    <Input className="h-9" value={z.name} onChange={(e) => setZoneField(zi, { name: e.target.value })} placeholder="Luxembourg, Gare" />
                   </div>
-                  <Button variant="outline" size="sm" onClick={() => delZone(zi)}><Trash2 className="h-4 w-4" /></Button>
+                  <div className="grid gap-1">
+                    <Label>Project</Label>
+                    <select className="h-9 border rounded-md px-2" value={z.project || "HF"} onChange={(e)=>setZoneField(zi,{project:e.target.value})}>
+                      {(load(K.settings, DEFAULT_SETTINGS).projects || ["HF"]).map(p => <option key={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid gap-1">
+                    <Label>Shift Type</Label>
+                    <select className="h-9 border rounded-md px-2" value={z.shiftType || "D2D"} onChange={(e)=>setZoneField(zi,{shiftType:e.target.value})}>
+                      {shiftTypes.map(t => <option key={t.val} value={t.val}>{t.label}</option>)}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="overflow-x-auto">
@@ -845,13 +865,9 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
                         <th className="p-2 text-left">Recruiter</th>
                         <th className="p-2 text-right">Hours</th>
                         <th className="p-2 text-right">Mult</th>
-                        <th className="p-2 text-right">Rate €</th>
                         <th className="p-2 text-right">Score</th>
                         <th className="p-2 text-right">Box2</th>
                         <th className="p-2 text-right">Box4</th>
-                        <th className="p-2 text-left">Type</th>
-                        <th className="p-2 text-left">Project</th>
-                        <th className="p-2 text-center">Disc</th>
                         <th className="p-2 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -874,9 +890,6 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
                             </select>
                           </td>
                           <td className="p-2 text-right">
-                            <Input className="w-24 h-9" inputMode="decimal" value={row.rateEUR ?? defaults.rate} onChange={(e) => setRow(zi, ri, { rateEUR: e.target.value })} />
-                          </td>
-                          <td className="p-2 text-right">
                             <Input className="w-20 h-9" inputMode="numeric" value={row.score ?? ""} onChange={(e) => setRow(zi, ri, { score: e.target.value })} />
                           </td>
                           <td className="p-2 text-right">
@@ -884,19 +897,6 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
                           </td>
                           <td className="p-2 text-right">
                             <Input className="w-20 h-9" inputMode="numeric" value={row.box4 ?? ""} onChange={(e) => setRow(zi, ri, { box4: e.target.value })} />
-                          </td>
-                          <td className="p-2">
-                            <select className="h-9 border rounded-md px-2" value={row.shiftType || defaults.shiftType} onChange={(e) => setRow(zi, ri, { shiftType: e.target.value })}>
-                              {shiftTypes.map((t) => (<option key={t.val} value={t.val}>{t.label}</option>))}
-                            </select>
-                          </td>
-                          <td className="p-2">
-                            <select className="h-9 border rounded-md px-2" value={row.project || defaults.project} onChange={(e) => setRow(zi, ri, { project: e.target.value })}>
-                              {safeProjects().map((p) => (<option key={p}>{p}</option>))}
-                            </select>
-                          </td>
-                          <td className="p-2 text-center">
-                            <input type="checkbox" checked={!!row.welcomeDiscount} onChange={(e) => setRow(zi, ri, { welcomeDiscount: e.target.checked })} />
                           </td>
                           <td className="p-2 text-right">
                             <Button variant="outline" size="sm" onClick={() => delRow(zi, ri)}><X className="h-4 w-4" /></Button>
@@ -927,7 +927,7 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
   );
 };
 /* ──────────────────────────────────────────────────────────────────────────
-  Salary — month nav, hours & Box2 commissions (role switches → Role(s))
+  Salary — month nav, hours & Box2 commissions (+ Wages column)
 ────────────────────────────────────────────────────────────────────────── */
 const rookieCommission = (box2) => {
   const t = {0:0,1:0,2:25,3:40,4:70,5:85,6:120,7:135,8:175,9:190,10:235};
@@ -950,12 +950,16 @@ const Salary = ({ recruiters, history }) => {
   const commMonth = prevMonthKey(workMonth);
   const inMonth = (iso, ym) => monthKey(iso) === ym;
 
+  const defaultRate = load(K.settings, DEFAULT_SETTINGS).defaultHourlyRate || DEFAULT_SETTINGS.defaultHourlyRate;
+
   const rows = recruiters
     .filter(r => status==="all" ? true : status==="active" ? !r.isInactive : !!r.isInactive)
     .map(r => {
       const hRows = history.filter(x => x.recruiterId===r.id && inMonth(x.dateISO, workMonth));
       const rolesWorked = Array.from(new Set(hRows.map(x => x.roleAtShift || r.role || "Rookie")));
       const hours = hRows.reduce((s,row)=>s + (row.hours ?? roleHoursDefault(row.roleAtShift||r.role||"Rookie")),0);
+      const wages = hours * defaultRate;
+
       const cRows = history.filter(x => x.recruiterId===r.id && inMonth(x.dateISO, commMonth));
       const bonus = cRows.reduce((s,row)=>{
         const b2 = Number(row.box2)||0;
@@ -963,14 +967,14 @@ const Salary = ({ recruiters, history }) => {
         const mult = row.commissionMult ?? roleMultiplierDefault(row.roleAtShift||r.role||"Rookie");
         return s + base*mult;
       },0);
-      return { recruiter:r, hours, bonus, rolesWorked };
+      return { recruiter:r, hours, wages, bonus, rolesWorked };
     });
 
   const exportCSV = () => {
-    const hdr=["Name","Crewcode","Role(s)",`Hours (${monthLabel(workMonth)})`,`Bonus € (${monthLabel(commMonth)})`];
+    const hdr=["Name","Crewcode","Role(s)",`Hours (${monthLabel(workMonth)})`,`Wages € (${monthLabel(workMonth)})`,`Bonus € (${monthLabel(commMonth)})`];
     const lines=[hdr.join(",")];
-    rows.forEach(({recruiter:r,hours,bonus,rolesWorked})=>{
-      lines.push([`"${r.name}"`,`"${r.crewCode||""}"`,`"${rolesWorked.join("/")||r.role||"Rookie"}"`,hours,bonus.toFixed(2)].join(","));
+    rows.forEach(({recruiter:r,hours,wages,bonus,rolesWorked})=>{
+      lines.push([`"${r.name}"`,`"${r.crewCode||""}"`,`"${rolesWorked.join("/")||r.role||"Rookie"}"`,hours,toMoney(wages),toMoney(bonus)].join(","));
     });
     const blob=new Blob([lines.join("\n")],{type:"text/csv"});
     const url=URL.createObjectURL(blob); const a=document.createElement("a");
@@ -997,7 +1001,7 @@ const Salary = ({ recruiters, history }) => {
       </div>
 
       <div className="text-sm text-muted-foreground">
-        Hours from <strong>{monthLabel(workMonth)}</strong> • Bonus from <strong>{monthLabel(commMonth)}</strong>
+        Hours & Wages from <strong>{monthLabel(workMonth)}</strong> • Bonus from <strong>{monthLabel(commMonth)}</strong>
       </div>
 
       <div className="overflow-x-auto border rounded-xl">
@@ -1007,16 +1011,18 @@ const Salary = ({ recruiters, history }) => {
             <th className="p-3 text-left">Crewcode</th>
             <th className="p-3 text-left">Role(s)</th>
             <th className="p-3 text-right">Hours</th>
+            <th className="p-3 text-right">Wages €</th>
             <th className="p-3 text-right">Bonus €</th>
           </tr></thead>
           <tbody>
-            {rows.map(({recruiter:r,hours,bonus,rolesWorked})=>(
+            {rows.map(({recruiter:r,hours,wages,bonus,rolesWorked})=>(
               <tr key={r.id} className="border-t">
                 <td className="p-3 font-medium">{r.name}</td>
                 <td className="p-3">{r.crewCode}</td>
                 <td className="p-3">{rolesWorked.join("/") || r.role || "Rookie"}</td>
                 <td className="p-3 text-right">{hours}</td>
-                <td className="p-3 text-right">{bonus.toFixed(2)}</td>
+                <td className="p-3 text-right">{toMoney(wages)}</td>
+                <td className="p-3 text-right">{toMoney(bonus)}</td>
               </tr>
             ))}
           </tbody>
@@ -1028,9 +1034,13 @@ const Salary = ({ recruiters, history }) => {
 
 /* ──────────────────────────────────────────────────────────────────────────
   Finances — weekly profit per Proago rules
+  Columns (and dropdown detail) in this order:
+  Shifts | Score | Box2 | Box4 | Wages | Income | Profit
+  Profit green if >0, red if <0
 ────────────────────────────────────────────────────────────────────────── */
 const Finances = ({ history }) => {
   const [weekStart, setWeekStart] = useState(()=>fmtISO(startOfWeekMon(new Date())));
+  const [expanded, setExpanded] = useState({}); // iso => bool
   const settings = load(K.settings, DEFAULT_SETTINGS);
   const matrix = settings.financeMatrix || DEFAULT_SETTINGS.financeMatrix;
   const defaultRate = settings.defaultHourlyRate || DEFAULT_SETTINGS.defaultHourlyRate;
@@ -1044,24 +1054,40 @@ const Finances = ({ history }) => {
   };
   const calcWages = (row) => {
     const hrs = row.hours ?? roleHoursDefault(row.roleAtShift||"Rookie");
-    const rate = row.rateEUR ?? defaultRate;
+    const rate = defaultRate;
     return hrs*rate;
   };
 
   const makeDayTotal = (iso) => {
     const rows = history.filter(h=>h.dateISO===iso);
     let income=0,wages=0,score=0,box2=0,box4=0,shifts=0;
+    const detail = rows.map(r=>{
+      const inc = calcIncome(r);
+      const wag = calcWages(r);
+      const prof = inc - wag;
+      return {
+        name: r.recruiterName || r.recruiterId,
+        score: Number(r.score)||0,
+        box2: Number(r.box2)||0,
+        box4: Number(r.box4)||0,
+        wages: wag,
+        income: inc,
+        profit: prof,
+      };
+    });
     rows.forEach(r=>{
       income+=calcIncome(r); wages+=calcWages(r);
       score+=Number(r.score)||0; box2+=Number(r.box2)||0; box4+=Number(r.box4)||0; shifts++;
     });
-    return {iso,income,wages,profit:income-wages,score,box2,box4,shifts};
+    return {iso,income,wages,profit:income-wages,score,box2,box4,shifts, detail};
   };
 
   const days=Array.from({length:7}).map((_,i)=>makeDayTotal(fmtISO(addDays(parseISO(weekStart),i))));
   const weekIncome=days.reduce((s,d)=>s+d.income,0);
   const weekWages=days.reduce((s,d)=>s+d.wages,0);
   const weekProfit=weekIncome-weekWages;
+
+  const profitColor = (v) => (v>0 ? "#10b981" : v<0 ? "#ef4444" : undefined);
 
   return (
     <div className="grid gap-4">
@@ -1072,26 +1098,75 @@ const Finances = ({ history }) => {
           <Button variant="outline" onClick={()=>setWeekStart(fmtISO(addDays(parseISO(weekStart),7)))}>Next<ChevronRight className="h-4 w-4"/></Button>
         </div>
         <div className="text-sm text-muted-foreground">
-          Income €{weekIncome.toFixed(2)} • Wages €{weekWages.toFixed(2)} • Profit €{weekProfit.toFixed(2)}
+          Income €{toMoney(weekIncome)} • Wages €{toMoney(weekWages)} • <span style={{color:profitColor(weekProfit)}}>Profit €{toMoney(weekProfit)}</span>
         </div>
       </div>
       <div className="overflow-x-auto border rounded-xl">
         <table className="min-w-full text-sm">
           <thead className="bg-zinc-50"><tr>
-            <th className="p-3">Date</th><th className="p-3 text-right">Income</th><th className="p-3 text-right">Wages</th><th className="p-3 text-right">Profit</th><th className="p-3 text-right">Score</th><th className="p-3 text-right">Box2</th><th className="p-3 text-right">Box4</th><th className="p-3 text-right">Shifts</th>
+            <th className="p-3">Date</th>
+            <th className="p-3 text-right">Shifts</th>
+            <th className="p-3 text-right">Score</th>
+            <th className="p-3 text-right">Box2</th>
+            <th className="p-3 text-right">Box4</th>
+            <th className="p-3 text-right">Wages</th>
+            <th className="p-3 text-right">Income</th>
+            <th className="p-3 text-right">Profit</th>
+            <th className="p-3 text-right">Details</th>
           </tr></thead>
           <tbody>
             {days.map(d=>(
-              <tr key={d.iso} className="border-t">
-                <td className="p-3">{fmtUK(d.iso)}</td>
-                <td className="p-3 text-right">{d.income.toFixed(2)}</td>
-                <td className="p-3 text-right">{d.wages.toFixed(2)}</td>
-                <td className="p-3 text-right">{d.profit.toFixed(2)}</td>
-                <td className="p-3 text-right">{d.score}</td>
-                <td className="p-3 text-right">{d.box2}</td>
-                <td className="p-3 text-right">{d.box4}</td>
-                <td className="p-3 text-right">{d.shifts}</td>
-              </tr>
+              <React.Fragment key={d.iso}>
+                <tr className="border-t">
+                  <td className="p-3">{fmtUK(d.iso)}</td>
+                  <td className="p-3 text-right">{d.shifts}</td>
+                  <td className="p-3 text-right">{d.score}</td>
+                  <td className="p-3 text-right">{d.box2}</td>
+                  <td className="p-3 text-right">{d.box4}</td>
+                  <td className="p-3 text-right">{toMoney(d.wages)}</td>
+                  <td className="p-3 text-right">{toMoney(d.income)}</td>
+                  <td className="p-3 text-right" style={{color:profitColor(d.profit)}}>{toMoney(d.profit)}</td>
+                  <td className="p-3 text-right">
+                    <Button variant="outline" size="sm" onClick={()=>setExpanded(e=>({...e, [d.iso]: !e[d.iso]}))}>
+                      {expanded[d.iso] ? "Hide" : "View"} <ChevronDown className="h-4 w-4 ml-1" />
+                    </Button>
+                  </td>
+                </tr>
+                {expanded[d.iso] && d.detail.length>0 && (
+                  <tr>
+                    <td colSpan={9} className="p-0">
+                      <div className="px-3 pb-3">
+                        <div className="overflow-x-auto border rounded-lg">
+                          <table className="min-w-full text-sm">
+                            <thead className="bg-zinc-50"><tr>
+                              <th className="p-2 text-left">Recruiter</th>
+                              <th className="p-2 text-right">Score</th>
+                              <th className="p-2 text-right">Box2</th>
+                              <th className="p-2 text-right">Box4</th>
+                              <th className="p-2 text-right">Wages</th>
+                              <th className="p-2 text-right">Income</th>
+                              <th className="p-2 text-right">Profit</th>
+                            </tr></thead>
+                            <tbody>
+                              {d.detail.map((r,i)=>(
+                                <tr key={i} className="border-t">
+                                  <td className="p-2">{r.name}</td>
+                                  <td className="p-2 text-right">{r.score}</td>
+                                  <td className="p-2 text-right">{r.box2}</td>
+                                  <td className="p-2 text-right">{r.box4}</td>
+                                  <td className="p-2 text-right">{toMoney(r.wages)}</td>
+                                  <td className="p-2 text-right">{toMoney(r.income)}</td>
+                                  <td className="p-2 text-right" style={{color:profitColor(r.profit)}}>{toMoney(r.profit)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
           </tbody>
         </table>
@@ -1099,43 +1174,218 @@ const Finances = ({ history }) => {
     </div>
   );
 };
-
 /* ──────────────────────────────────────────────────────────────────────────
   Settings (defaults + finance matrix + backfill + bulk delete history)
 ────────────────────────────────────────────────────────────────────────── */
-// ... (Settings component code from earlier message goes here)
+const Settings = ({ history, setHistory }) => {
+  const [settings, setSettings] = useState(load(K.settings, DEFAULT_SETTINGS));
+  const [credOpen, setCredOpen] = useState(false);
+
+  useEffect(() => save(K.settings, settings), [settings]);
+
+  const updateMatrix = (type, disc, box, val) => {
+    setSettings((s) => {
+      const next = clone(s);
+      next.financeMatrix[type][disc][box] = Number(val) || 0;
+      return next;
+    });
+  };
+
+  const backfillRate = () => {
+    const rate = settings.defaultHourlyRate || DEFAULT_SETTINGS.defaultHourlyRate;
+    setHistory((h) => h.map((row) => ({ ...row, rateEUR: row.rateEUR ?? rate })));
+    alert("Backfilled missing hourly rates ✅");
+  };
+
+  const bulkDelete = () => {
+    setHistory([]);
+    alert("All history deleted ❌");
+  };
+
+  return (
+    <div className="grid gap-6 max-w-4xl">
+      <h3 className="text-lg font-semibold">Settings</h3>
+
+      <div className="grid gap-2">
+        <Label>Default Hourly Rate (€)</Label>
+        <Input
+          type="number"
+          value={settings.defaultHourlyRate}
+          onChange={(e) =>
+            setSettings({ ...settings, defaultHourlyRate: Number(e.target.value) })
+          }
+        />
+      </div>
+
+      <div className="grid gap-2">
+        <Label>Projects (comma separated)</Label>
+        <Input
+          value={settings.projects.join(", ")}
+          onChange={(e) =>
+            setSettings({ ...settings, projects: e.target.value.split(",").map((p) => p.trim()).filter(Boolean) })
+          }
+        />
+      </div>
+
+      <div>
+        <h4 className="font-medium mb-2">Finance Matrix</h4>
+        {Object.keys(settings.financeMatrix).map((type) => (
+          <div key={type} className="border rounded-xl p-3 mb-3">
+            <div className="font-semibold mb-2">{type}</div>
+            {Object.keys(settings.financeMatrix[type]).map((disc) => (
+              <div key={disc} className="mb-2">
+                <div className="text-sm text-zinc-600 mb-1">{disc}</div>
+                <div className="flex gap-3">
+                  <div>
+                    <Label>Box2</Label>
+                    <Input
+                      type="number"
+                      value={settings.financeMatrix[type][disc].box2}
+                      onChange={(e) =>
+                        updateMatrix(type, disc, "box2", e.target.value)
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>Box4</Label>
+                    <Input
+                      type="number"
+                      value={settings.financeMatrix[type][disc].box4}
+                      onChange={(e) =>
+                        updateMatrix(type, disc, "box4", e.target.value)
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-3">
+        <Button variant="outline" onClick={backfillRate}>
+          Backfill Hourly Rate
+        </Button>
+        <Button
+          variant="destructive"
+          onClick={() => setCredOpen(true)}
+        >
+          Bulk Delete History
+        </Button>
+      </div>
+
+      <CredentialDialog
+        open={credOpen}
+        label="Confirm bulk delete of history"
+        onCancel={() => setCredOpen(false)}
+        onSuccess={() => {
+          bulkDelete();
+          setCredOpen(false);
+        }}
+      />
+    </div>
+  );
+};
 
 /* ──────────────────────────────────────────────────────────────────────────
   Main App Wrapper
 ────────────────────────────────────────────────────────────────────────── */
 export default function App() {
-  const [authed,setAuthed]=useState(!!localStorage.getItem(AUTH_SESSION_KEY));
-  const [tab,setTab]=useState("inflow");
-  const [pipeline,setPipeline]=useState(load(K.pipeline,{leads:[],interview:[],formation:[]}));
-  const [recruiters,setRecruiters]=useState(load(K.recruiters,[]));
-  const [planning,setPlanning]=useState(load(K.planning,{}));
-  const [history,setHistory]=useState(load(K.history,[]));
+  // wipe data once if version changed
+  useEffect(() => {
+    const ver = localStorage.getItem(VERSION_KEY);
+    if (ver !== DATA_VERSION) {
+      localStorage.clear();
+      localStorage.setItem(VERSION_KEY, DATA_VERSION);
+    }
+  }, []);
 
-  useEffect(()=>save(K.pipeline,pipeline),[pipeline]);
-  useEffect(()=>save(K.recruiters,recruiters),[recruiters]);
-  useEffect(()=>save(K.planning,planning),[planning]);
-  useEffect(()=>save(K.history,history),[history]);
+  const [authed, setAuthed] = useState(!!localStorage.getItem(AUTH_SESSION_KEY));
+  const [tab, setTab] = useState("inflow");
+  const [pipeline, setPipeline] = useState(
+    load(K.pipeline, { leads: [], interview: [], formation: [] })
+  );
+  const [recruiters, setRecruiters] = useState(load(K.recruiters, []));
+  const [planning, setPlanning] = useState(load(K.planning, {}));
+  const [history, setHistory] = useState(load(K.history, []));
 
-  const onLogout=()=>{localStorage.removeItem(AUTH_SESSION_KEY);setAuthed(false);};
-  if(!authed) return <Login onOk={()=>setAuthed(true)}/>;
+  useEffect(() => save(K.pipeline, pipeline), [pipeline]);
+  useEffect(() => save(K.recruiters, recruiters), [recruiters]);
+  useEffect(() => save(K.planning, planning), [planning]);
+  useEffect(() => save(K.history, history), [history]);
 
-  const weekBadge=tab==="planning"?`Week ${weekNumberISO(startOfWeekMon(new Date()))}`:"";
-  const [salaryUnlocked,setSalaryUnlocked]=useState(!!localStorage.getItem(SALARY_SESSION_KEY));
-  const [financeUnlocked,setFinanceUnlocked]=useState(!!localStorage.getItem(FINANCE_SESSION_KEY));
+  const onLogout = () => {
+    localStorage.removeItem(AUTH_SESSION_KEY);
+    setAuthed(false);
+  };
+  if (!authed) return <Login onOk={() => setAuthed(true)} />;
+
+  const weekBadge = tab === "planning" ? `Week ${weekNumberISO(startOfWeekMon(new Date()))}` : "";
+  const [salaryUnlocked, setSalaryUnlocked] = useState(
+    !!localStorage.getItem(SALARY_SESSION_KEY)
+  );
+  const [financeUnlocked, setFinanceUnlocked] = useState(
+    !!localStorage.getItem(FINANCE_SESSION_KEY)
+  );
 
   return (
     <Shell tab={tab} setTab={setTab} onLogout={onLogout} weekBadge={weekBadge}>
-      {tab==="inflow" && <Inflow pipeline={pipeline} setPipeline={setPipeline} onHire={(rec)=>{/* recruiter creation logic */}}/>}
-      {tab==="recruiters" && <Recruiters recruiters={recruiters} setRecruiters={setRecruiters} history={history} setHistory={setHistory}/>}
-      {tab==="planning" && <Planning recruiters={recruiters} planning={planning} setPlanning={setPlanning} history={history} setHistory={setHistory}/>}
-      {tab==="salary" && (salaryUnlocked ? <Salary recruiters={recruiters} history={history}/> : <Gate storageKey={SALARY_SESSION_KEY} label="Re-enter credentials for Salary" onOk={()=>setSalaryUnlocked(true)}/>)}
-      {tab==="finances" && (financeUnlocked ? <Finances history={history}/> : <Gate storageKey={FINANCE_SESSION_KEY} label="Re-enter credentials for Finances" onOk={()=>setFinanceUnlocked(true)}/>)}
-      {tab==="settings" && <Settings history={history} setHistory={setHistory}/>}
+      {tab === "inflow" && (
+        <Inflow
+          pipeline={pipeline}
+          setPipeline={setPipeline}
+          onHire={(rec) => {
+            const newRec = {
+              id: crypto.randomUUID(),
+              name: titleCase(rec.name),
+              phone: rec.phone,
+              crewCode: rec.crewCode,
+              role: rec.role || "Rookie",
+              contract: "",
+            };
+            setRecruiters((all) => [...all, newRec]);
+          }}
+        />
+      )}
+      {tab === "recruiters" && (
+        <Recruiters
+          recruiters={recruiters}
+          setRecruiters={setRecruiters}
+          history={history}
+          setHistory={setHistory}
+        />
+      )}
+      {tab === "planning" && (
+        <Planning
+          recruiters={recruiters}
+          planning={planning}
+          setPlanning={setPlanning}
+          history={history}
+          setHistory={setHistory}
+        />
+      )}
+      {tab === "salary" &&
+        (salaryUnlocked ? (
+          <Salary recruiters={recruiters} history={history} />
+        ) : (
+          <Gate
+            storageKey={SALARY_SESSION_KEY}
+            label="Re-enter credentials for Salary"
+            onOk={() => setSalaryUnlocked(true)}
+          />
+        ))}
+      {tab === "finances" &&
+        (financeUnlocked ? (
+          <Finances history={history} />
+        ) : (
+          <Gate
+            storageKey={FINANCE_SESSION_KEY}
+            label="Re-enter credentials for Finances"
+            onOk={() => setFinanceUnlocked(true)}
+          />
+        ))}
+      {tab === "settings" && <Settings history={history} setHistory={setHistory} />}
     </Shell>
   );
 }
