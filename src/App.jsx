@@ -1,490 +1,768 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { motion } from "framer-motion";
-import {
-  Plus,
-  Upload,
-  Download,
-  Calendar as CalendarIcon,
-  Clock,
-  Phone,
-  User,
-  CheckCircle2,
-  ChevronRight,
-  Trash2,
-  Edit3,
-  LogOut,
-  KeyRound,
-  Shield,
-  Settings as SettingsIcon,
-  MessageCircle,
-  Info,
-} from "lucide-react";
+import { Plus, Trash2, LogOut, Settings as SettingsIcon, Download, Upload, Check, CalendarClock, Users, ListChecks, ChevronLeft, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
 
-/**
- * Proago Recruitment – minimal, stable build
- * - 3 stages (Lead → Interview → Formation) with accumulation
- * - Add lead + inline editor → promote when Result = "Yes"
- * - CSV + Indeed-JSON import (flexible fields)
- * - CSV export
- * - Login gate + Remember me + simple rate limiter (3 tries / 15m)
- * - Settings to store an optional OpenAI API key locally
- * - Lora font for the product title
- */
-
-// ——— Brand ———
-const BRAND_COLORS = { primary: "#d9010b", secondary: "#eb2a2a", accent: "#fca11c" };
-const ICON_PATH = "/proago-icon.png";
-
-// ——— Auth ———
-const AUTH_USER = "Administrator";
-const AUTH_PASS = "Sergio R4mos";
-const AUTH_PERSIST = "proago_auth_persist_v1"; // "1" saved in localStorage
-const AUTH_SESSION = "proago_auth_session_v1"; // "1" saved in sessionStorage
-const AUTH_FAILS = "proago_auth_fails_v1";     // {count, until}
-
-// ——— Storage Keys ———
-const LS_CANDIDATES = "proago_pipeline_v2";    // array
-const LS_SETTINGS   = "proago_settings_v1";     // { openaiKey? }
-
-// ——— Data model ———
-const STAGES = { LEAD: "LEAD", INTERVIEW: "INTERVIEW", FORMATION: "FORMATION" };
-const nowISO = () => new Date().toISOString();
-const uid = () => (Math.random().toString(36).slice(2,10) + Date.now().toString(36)).toUpperCase();
-
-// ——— Helpers ———
-const normalize = (s) => (s||"").toString().trim().toLowerCase();
-const pickFrom = (obj, keys, fallback="") => {
-  for (const k of keys) { if (obj && obj[k] != null && String(obj[k]).trim() !== "") return String(obj[k]); }
-  return fallback;
+// --------------------------------------------------
+// Brand & Auth
+// --------------------------------------------------
+const BRAND = {
+  primary: "#d9010b",
+  secondary: "#eb2a2a",
+  accent: "#fca11c",
+  white: "#ffffff",
 };
 
-function useLora() {
-  useEffect(() => {
-    const id = "lora-font-link";
-    if (!document.getElementById(id)) {
-      const link = document.createElement("link");
-      link.id = id;
-      link.rel = "stylesheet";
-      link.href = "https://fonts.googleapis.com/css2?family=Lora:wght@400;700&display=swap";
-      document.head.appendChild(link);
-    }
-  }, []);
-}
+const AUTH_USER = "Administrator";
+const AUTH_PASS = "Sergio R4mos";
+const AUTH_SESSION_KEY = "proago_auth_session";
 
-function loadCandidates(){
-  try { const raw = localStorage.getItem(LS_CANDIDATES); return raw ? JSON.parse(raw) : []; } catch { return []; }
-}
-function saveCandidates(arr){ localStorage.setItem(LS_CANDIDATES, JSON.stringify(arr)); }
+// --------------------------------------------------
+// Utilities
+// --------------------------------------------------
+const formatDateISO = (d) => d.toISOString().slice(0, 10);
+const startOfWeekMonday = (date = new Date()) => {
+  const d = new Date(date);
+  const day = (d.getDay() + 6) % 7; // Monday=0
+  d.setDate(d.getDate() - day);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+const addDays = (date, n) => {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+};
 
-// ——— CSV helpers ———
-function toCSV(rows){
-  const headers = ["id","stage","createdAt","firstName","lastName","phone","callsQty","callAttempts","leadResult","interviewDate","interviewTime","interviewResult","formationDate","formationTime","formationResult"];
-  const esc = (v)=>{ if(v==null) return ""; const s=String(v); return /[",\n]/.test(s) ? '"'+s.replaceAll('"','""')+'"' : s; };
-  const lines = [headers.join(",")];
-  for(const r of rows){ lines.push(headers.map(h=>esc(r[h])).join(",")); }
-  return lines.join("\n");
-}
-function parseCSV(text){
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  if(!lines.length) return {headers:[], rows:[]};
-  const split = (line)=>{
-    const out=[]; let cur=""; let q=false; for(let i=0;i<line.length;i++){ const ch=line[i];
-      if(ch==='"'){ if(q && line[i+1]==='"'){ cur+='"'; i++; } else { q=!q; } }
-      else if(ch===',' && !q){ out.push(cur); cur=""; } else { cur+=ch; }
-    } out.push(cur); return out;
-  };
-  const headers = split(lines[0]).map(h=>normalize(h));
-  const rows = lines.slice(1).map(l=>split(l));
-  return { headers, rows };
-}
+// --------------------------------------------------
+// Seed data (safe defaults; persisted in localStorage)
+// --------------------------------------------------
+const seedRecruiters = [
+  { id: "r1", name: "Oscar", crewCode: "OSC", role: "Promoter", avg: 2.3, allTime: 318 },
+  { id: "r2", name: "Patrick", crewCode: "PAT", role: "Rookie", avg: 1.4, allTime: 27 },
+  { id: "r3", name: "Gilles", crewCode: "GIL", role: "Promoter", avg: 1.9, allTime: 122 },
+  { id: "r4", name: "Yanis", crewCode: "YAN", role: "Pool Captain", avg: 2.1, allTime: 203 },
+];
 
-// ——— UI atoms ———
-const Button = ({className="", style, children, ...rest}) => (
-  <button {...rest}
-    style={{background:BRAND_COLORS.primary, color:"white", border:`1px solid ${BRAND_COLORS.secondary}`, ...style}}
-    className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl shadow-sm active:scale-[.99] disabled:opacity-60 ${className}`}
-  >{children}</button>
-);
-const GhostButton = ({className="", style, children, ...rest}) => (
-  <button {...rest}
-    style={{borderColor:BRAND_COLORS.secondary, ...style}}
-    className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl border text-slate-700 hover:bg-slate-50 active:scale-[.99] disabled:opacity-50 ${className}`}
-  >{children}</button>
-);
-const Input = (props) => <input {...props} className={`px-3 py-2 rounded-xl border border-slate-300 focus:border-slate-400 focus:ring-2 focus:ring-slate-200 outline-none bg-white text-slate-800 ${props.className||""}`} />;
-const Select = ({className,children,...rest}) => <select {...rest} className={`px-3 py-2 rounded-xl border border-slate-300 focus:border-slate-400 focus:ring-2 focus:ring-slate-200 outline-none bg-white text-slate-800 ${className||""}`}>{children}</select>;
-const Field  = ({label,hint,children}) => (
-  <label className="flex flex-col gap-1">
-    <span className="text-sm font-medium text-slate-700">{label}</span>
-    {children}
-    {hint && <span className="text-xs text-slate-500">{hint}</span>}
-  </label>
-);
-const SectionCard = ({title,subtitle,right,children}) => (
-  <div className="bg-white/70 backdrop-blur border border-slate-200 rounded-2xl p-4 shadow-sm">
-    <div className="flex items-start justify-between gap-3 mb-3">
-      <div>
-        <h2 className="text-xl font-semibold text-slate-800">{title}</h2>
-        {subtitle && <p className="text-sm text-slate-500 mt-0.5">{subtitle}</p>}
-      </div>
-      <div className="flex items-center gap-2">{right}</div>
+const seedLeads = [
+  { id: "l1", name: "Jessica Rodrigues", phone: "+352 621 123 456", source: "Indeed", notes: "Met @ Opkorn", crew: "OSC" },
+  { id: "l2", name: "Marie Valentin", phone: "+352 661 222 333", source: "Referral", notes: "Spoke FR/EN", crew: "PAT" },
+];
+
+// --------------------------------------------------
+// Local storage helpers
+// --------------------------------------------------
+const load = (k, fallback) => {
+  try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+};
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+// Keys
+const K = {
+  recruiters: "proago_recruiters",
+  pipeline: "proago_pipeline", // {leads:[...], interview:[...], formation:[...], bin:[...]}
+  planning: "proago_planning", // hash by weekStartISO
+};
+
+// initialize defaults on first load
+const ensureDefaults = () => {
+  if (!load(K.recruiters)) save(K.recruiters, seedRecruiters);
+  if (!load(K.pipeline)) save(K.pipeline, { leads: seedLeads, interview: [], formation: [], bin: [] });
+  if (!load(K.planning)) save(K.planning, {});
+};
+
+// --------------------------------------------------
+// Small UI helpers
+// --------------------------------------------------
+const SectionTitle = ({ icon: Icon, title, right }) => (
+  <div className="flex items-center justify-between mb-3">
+    <div className="flex gap-2 items-center">
+      {Icon && <Icon className="h-5 w-5" />}
+      <h3 className="font-semibold text-lg">{title}</h3>
     </div>
+    <div>{right}</div>
+  </div>
+);
+
+const Field = ({ label, children, className = "" }) => (
+  <div className={`grid gap-1 ${className}`}>
+    <Label className="text-xs uppercase tracking-wide text-muted-foreground">{label}</Label>
     {children}
   </div>
 );
 
-// ——— Cards ———
-function CandidateHeader({ c }){
-  return (
-    <div className="flex items-center gap-3">
-      <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center"><User className="w-5 h-5 text-slate-600"/></div>
-      <div>
-        <div className="font-medium text-slate-800">{c.firstName} {c.lastName}</div>
-        <div className="text-sm text-slate-500">{c.phone || "—"}</div>
-      </div>
-    </div>
-  );
-}
+// --------------------------------------------------
+// Auth Gate
+// --------------------------------------------------
+const AuthGate = ({ onAuthed }) => {
+  const [user, setUser] = useState("");
+  const [pass, setPass] = useState("");
+  const [error, setError] = useState("");
 
-function LeadCard({ c, onUpdate, onDelete, onPromote }){
-  return (
-    <div className="border border-slate-200 rounded-2xl p-3 bg-white/80">
-      <CandidateHeader c={c}/>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
-        <div className="flex items-center gap-2 text-sm text-slate-700"><Phone className="w-4 h-4"/> Calls: <span className="font-medium">{c.callsQty ?? 0}</span></div>
-        <div className="flex items-center gap-2 text-sm text-slate-700">Attempts: <span className="font-medium">{c.callAttempts ?? 1}</span></div>
-        <div className="flex items-center gap-2 text-sm text-slate-700">Result: <span className="font-medium">{c.leadResult ?? "Pending"}</span></div>
-        <div className="text-xs text-slate-500">Created {new Date(c.createdAt).toLocaleString()}</div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
-        <Field label="Calls quantity"><Input type="number" min={0} value={c.callsQty||0} onChange={e=>onUpdate({...c,callsQty:Number(e.target.value)||0})}/></Field>
-        <Field label="Call attempts (1/2/3)"><Select value={String(c.callAttempts||1)} onChange={e=>onUpdate({...c,callAttempts:Number(e.target.value)||1})}><option value="1">1</option><option value="2">2</option><option value="3">3</option></Select></Field>
-        <Field label="Lead result"><Select value={c.leadResult||"Pending"} onChange={e=>onUpdate({...c,leadResult:e.target.value})}><option>Pending</option><option>Yes</option><option>No</option></Select></Field>
-      </div>
-      <div className="flex justify-between items-center mt-3">
-        <GhostButton onClick={onPromote} disabled={c.leadResult!=="Yes"}><CheckCircle2 className="w-4 h-4"/> Move to Interview</GhostButton>
-        <GhostButton onClick={onDelete}><Trash2 className="w-4 h-4"/>Delete</GhostButton>
-      </div>
-    </div>
-  );
-}
+  useEffect(() => {
+    const sess = sessionStorage.getItem(AUTH_SESSION_KEY);
+    if (sess === "1") onAuthed();
+  }, [onAuthed]);
 
-function InterviewEditor({ c, onUpdate }){
-  const [d,setD]=useState({interviewDate:c.interviewDate||"", interviewTime:c.interviewTime||"", interviewResult:c.interviewResult||"Pending"});
-  useEffect(()=>setD({interviewDate:c.interviewDate||"", interviewTime:c.interviewTime||"", interviewResult:c.interviewResult||"Pending"}),[c.id]);
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-      <Field label="Interview date"><Input type="date" value={d.interviewDate} onChange={e=>setD(s=>({...s,interviewDate:e.target.value}))}/></Field>
-      <Field label="Interview time"><Input type="time" value={d.interviewTime} onChange={e=>setD(s=>({...s,interviewTime:e.target.value}))}/></Field>
-      <Field label="Result"><Select value={d.interviewResult} onChange={e=>setD(s=>({...s,interviewResult:e.target.value}))}><option>Pending</option><option>Yes</option><option>No</option></Select></Field>
-      <div className="md:col-span-3 flex justify-end gap-2">
-        <GhostButton onClick={()=>onUpdate({...c,...d})}><Edit3 className="w-4 h-4"/>Save</GhostButton>
-        <Button onClick={()=>onUpdate({...c,...d, stage: d.interviewResult === "Yes" ? STAGES.FORMATION : c.stage})}><ChevronRight className="w-4 h-4"/>Move forward if Yes</Button>
-      </div>
-    </div>
-  );
-}
-function InterviewCard({ c, onUpdate, onDelete }){
-  return (
-    <div className="border border-slate-200 rounded-2xl p-3 bg-white/80">
-      <CandidateHeader c={c}/>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
-        <div className="flex items-center gap-2 text-sm text-slate-700"><CalendarIcon className="w-4 h-4"/> {c.interviewDate||"—"}</div>
-        <div className="flex items-center gap-2 text-sm text-slate-700"><Clock className="w-4 h-4"/> {c.interviewTime||"—"}</div>
-        <div className="flex items-center gap-2 text-sm text-slate-700">Result: <span className="font-medium">{c.interviewResult||"Pending"}</span></div>
-      </div>
-      <div className="mt-3"><InterviewEditor c={c} onUpdate={onUpdate}/></div>
-      <div className="flex justify-end mt-2"><GhostButton onClick={onDelete}><Trash2 className="w-4 h-4"/>Delete</GhostButton></div>
-    </div>
-  );
-}
-
-function FormationEditor({ c, onUpdate }){
-  const [d,setD]=useState({formationDate:c.formationDate||"", formationTime:c.formationTime||"", formationResult:c.formationResult||"Pending"});
-  useEffect(()=>setD({formationDate:c.formationDate||"", formationTime:c.formationTime||"", formationResult:c.formationResult||"Pending"}),[c.id]);
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-      <Field label="Formation date"><Input type="date" value={d.formationDate} onChange={e=>setD(s=>({...s,formationDate:e.target.value}))}/></Field>
-      <Field label="Formation time"><Input type="time" value={d.formationTime} onChange={e=>setD(s=>({...s,formationTime:e.target.value}))}/></Field>
-      <Field label="Result"><Select value={d.formationResult} onChange={e=>setD(s=>({...s,formationResult:e.target.value}))}><option>Pending</option><option>Yes</option><option>No</option></Select></Field>
-      <div className="md:col-span-3 flex justify-end gap-2"><GhostButton onClick={()=>onUpdate({...c,...d})}><Edit3 className="w-4 h-4"/>Save</GhostButton></div>
-    </div>
-  );
-}
-function FormationCard({ c, onUpdate, onDelete }){
-  return (
-    <div className="border border-slate-200 rounded-2xl p-3 bg-white/80">
-      <CandidateHeader c={c}/>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
-        <div className="flex items-center gap-2 text-sm text-slate-700"><CalendarIcon className="w-4 h-4"/> {c.formationDate||"—"}</div>
-        <div className="flex items-center gap-2 text-sm text-slate-700"><Clock className="w-4 h-4"/> {c.formationTime||"—"}</div>
-        <div className="flex items-center gap-2 text-sm text-slate-700">Result: <span className="font-medium">{c.formationResult||"Pending"}</span></div>
-      </div>
-      <div className="mt-3"><FormationEditor c={c} onUpdate={onUpdate}/></div>
-      <div className="flex justify-end mt-2"><GhostButton onClick={onDelete}><Trash2 className="w-4 h-4"/>Delete</GhostButton></div>
-    </div>
-  );
-}
-
-// ——— Importers ———
-function importCSVFile(file, setCandidates){
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const text = String(reader.result||"");
-      const {headers, rows} = parseCSV(text);
-      const H = headers; // already normalized
-      const idx = (keys,row) => { for(let i=0;i<H.length;i++){ if(keys.includes(H[i])) return row[i]; } return ""; };
-      const list = rows.map(row => ({
-        id: uid(),
-        stage: STAGES.LEAD,
-        createdAt: nowISO(),
-        firstName: idx(["first name","firstname","givenname"],row) || "",
-        lastName:  idx(["last name","lastname","surname"],row) || "",
-        phone:     idx(["phone","phone number","phonenumber"],row) || "",
-        callsQty: Number(idx(["callsqty","calls quantity"],row))||0,
-        callAttempts: Number(idx(["callattempts","attempts"],row))||1,
-        leadResult: idx(["leadresult","result"],row) || "Pending",
-        interviewDate: idx(["interview date"],row) || "",
-        interviewTime: idx(["interview time"],row) || "",
-        interviewResult: idx(["interview result"],row) || "Pending",
-        formationDate: idx(["formation date"],row) || "",
-        formationTime: idx(["formation time"],row) || "",
-        formationResult: idx(["formation result"],row) || "Pending",
-      }));
-      // Append, do NOT overwrite (so lists accumulate)
-      setCandidates(prev => [...prev, ...list]);
-    } catch {
-      alert("Failed to import CSV");
+  const submit = (e) => {
+    e.preventDefault();
+    if (user === AUTH_USER && pass === AUTH_PASS) {
+      sessionStorage.setItem(AUTH_SESSION_KEY, "1");
+      onAuthed();
+    } else {
+      setError("Incorrect credentials");
     }
   };
-  reader.readAsText(file);
-}
 
-function importIndeedJSONFile(file, setCandidates){
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const data = JSON.parse(String(reader.result||"{}"));
-      const appl = data.applicant || data.candidate || data || {};
+  return (
+    <div className="min-h-screen grid place-items-center bg-gradient-to-br from-zinc-50 to-zinc-100">
+      <Card className="w-full max-w-sm shadow-xl">
+        <CardHeader>
+          <CardTitle className="text-xl" style={{ color: BRAND.primary }}>Proago Recruitment</CardTitle>
+          <p className="text-sm text-muted-foreground">Sign in to continue</p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="grid gap-3">
+            <Field label="Username">
+              <Input autoComplete="off" value={user} onChange={(e) => setUser(e.target.value)} />
+            </Field>
+            <Field label="Password">
+              <Input autoComplete="new-password" type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
+            </Field>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <Button type="submit" className="mt-2" style={{ background: BRAND.primary }}>Login</Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
 
-      // Flexible name resolution
-      let firstName = pickFrom(appl,["first_name","firstname","given_name"],"").trim();
-      let lastName  = pickFrom(appl,["last_name","lastname","family_name"],"").trim();
-      const full    = pickFrom(appl,["fullName","name"],"").trim();
-      if(!firstName && full){
-        const parts = full.split(/\s+/);
-        firstName = parts.slice(0,-1).join(" ") || parts[0] || "";
-        lastName  = parts.slice(-1).join(" ") || "";
-      }
+// --------------------------------------------------
+// Navigation Tabs Shell
+// --------------------------------------------------
+const Shell = ({ tab, setTab, onLogout, children }) => (
+  <div className="min-h-screen bg-white">
+    <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
+      <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="h-6 w-6 rounded" style={{ background: BRAND.primary }} />
+          <span className="font-semibold">Proago Recruitment</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon"><SettingsIcon className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="sm" onClick={onLogout}><LogOut className="h-4 w-4 mr-1" />Logout</Button>
+        </div>
+      </div>
+      <div className="mx-auto max-w-7xl px-4 pb-3">
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList className="grid grid-cols-6 w-full">
+            <TabsTrigger value="leads">Leads</TabsTrigger>
+            <TabsTrigger value="interview">Interview</TabsTrigger>
+            <TabsTrigger value="formation">Formation</TabsTrigger>
+            <TabsTrigger value="bin">Bin</TabsTrigger>
+            <TabsTrigger value="recruiters">Recruiters</TabsTrigger>
+            <TabsTrigger value="planning">Planning</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+    </header>
+    <main className="mx-auto max-w-7xl px-4 py-6">
+      {children}
+    </main>
+  </div>
+);
 
-      const phone = pickFrom(appl,["phoneNumber","phone","phone_number"],"").trim();
-      const createdAtRaw = data.application_date || data.applied_on || data.created_at || data.createdAt || appl.created_at;
-      const createdAt = createdAtRaw ? new Date(createdAtRaw).toISOString() : nowISO();
+// --------------------------------------------------
+// Pipeline shared table & move logic
+// --------------------------------------------------
+const PipelineTable = ({ items, onMove, onDelete, next, prev }) => (
+  <div className="overflow-x-auto border rounded-xl">
+    <table className="min-w-full text-sm">
+      <thead className="bg-zinc-50">
+        <tr>
+          <th className="text-left p-3">Name</th>
+          <th className="text-left p-3">Phone</th>
+          <th className="text-left p-3">Source</th>
+          <th className="text-left p-3">Crew</th>
+          <th className="text-left p-3">Notes</th>
+          <th className="text-right p-3">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((x) => (
+          <tr key={x.id} className="border-t">
+            <td className="p-3 font-medium">{x.name}</td>
+            <td className="p-3">{x.phone}</td>
+            <td className="p-3">{x.source}</td>
+            <td className="p-3"><Badge>{x.crew || "-"}</Badge></td>
+            <td className="p-3">{x.notes || ""}</td>
+            <td className="p-3">
+              <div className="flex gap-2 justify-end">
+                {prev && <Button variant="outline" size="sm" onClick={() => onMove(x, prev)}>Back</Button>}
+                {next && <Button size="sm" style={{ background: BRAND.primary }} onClick={() => onMove(x, next)}>Move to {next}</Button>}
+                <Button variant="destructive" size="sm" onClick={() => onDelete(x)}><Trash2 className="h-4 w-4" /></Button>
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
 
-      const lead = { id: uid(), stage: STAGES.LEAD, createdAt, firstName, lastName, phone, callsQty:0, callAttempts:1, leadResult:"Pending" };
-      // Append to list, don't replace
-      setCandidates(prev => [lead, ...prev]);
-    } catch {
-      alert("Failed to import Indeed JSON");
-    }
+const PipelinePage = () => {
+  const [data, setData] = useState(load(K.pipeline, { leads: [], interview: [], formation: [], bin: [] }));
+  const [createOpen, setCreateOpen] = useState(false);
+  const [draft, setDraft] = useState({ name: "", phone: "", source: "Indeed", notes: "", crew: "" });
+
+  const savePipe = (next) => { setData(next); save(K.pipeline, next); };
+
+  const move = (item, to) => {
+    const columns = ["leads", "interview", "formation", "bin"];
+    const from = columns.find((c) => data[c].some((z) => z.id === item.id));
+    if (!from) return;
+    const nextData = structuredClone(data);
+    nextData[from] = nextData[from].filter((z) => z.id !== item.id);
+    nextData[to].push(item);
+    savePipe(nextData);
   };
-  reader.readAsText(file);
-}
 
-// ——— Settings ———
-function useSettings(){
-  const [settings,setSettings] = useState(()=>{ try{ return JSON.parse(localStorage.getItem(LS_SETTINGS)||"{}"); } catch { return {}; } });
-  useEffect(()=>{ localStorage.setItem(LS_SETTINGS, JSON.stringify(settings)); }, [settings]);
-  return [settings,setSettings];
-}
+  const del = (item) => {
+    const cols = ["leads", "interview", "formation", "bin"];
+    const nextData = structuredClone(data);
+    cols.forEach((c) => (nextData[c] = nextData[c].filter((z) => z.id !== item.id)));
+    savePipe(nextData);
+  };
 
-function SettingsModal({ open, onClose, settings, setSettings, onExportCSV }){
-  const [key,setKey] = useState(settings.openaiKey||"");
-  useEffect(()=>{ if(open){ setKey(settings.openaiKey||""); } },[open]);
-  if(!open) return null;
-  return (
-    <div className="fixed inset-0 bg-black/30 z-50 p-4 flex items-center justify-center" onClick={onClose}>
-      <div className="w-full max-w-xl bg-white rounded-2xl border border-slate-200 shadow-lg" onClick={e=>e.stopPropagation()}>
-        <div className="p-4 border-b flex items-center gap-2"><SettingsIcon className="w-5 h-5"/><b>Settings</b></div>
-        <div className="p-4 grid gap-4 text-sm">
-          <div>
-            <div className="font-medium">Assistant (OpenAI)</div>
-            <div className="text-slate-600">Paste your API key. It is stored only on your device (localStorage) and used by the optional in-app assistant.</div>
-            <Input placeholder="sk-..." value={key} onChange={e=>setKey(e.target.value)} />
-            <div className="mt-2 flex gap-2">
-              <GhostButton onClick={()=>setSettings({...settings, openaiKey:key})}><KeyRound className="w-4 h-4"/>Save key</GhostButton>
-              <GhostButton onClick={()=>{setKey(""); setSettings(s=>({...s, openaiKey: ""}));}}>Remove</GhostButton>
-            </div>
-          </div>
-          <div>
-            <div className="font-medium">Data export</div>
-            <GhostButton onClick={onExportCSV}><Download className="w-4 h-4"/>Export CSV</GhostButton>
-          </div>
-        </div>
-        <div className="p-3 border-t text-right"><GhostButton onClick={onClose}>Close</GhostButton></div>
-      </div>
-    </div>
-  );
-}
-
-// ——— Login ———
-function checkLock(){
-  try { const lock = JSON.parse(localStorage.getItem(AUTH_FAILS)||"null"); if (lock && lock.until && Date.now() < lock.until) return lock; } catch {}
-  return null;
-}
-function recordFail(){
-  const lock = checkLock(); if(lock){ localStorage.setItem(AUTH_FAILS, JSON.stringify({count:lock.count+1, until:lock.until})); return; }
-  const prev = JSON.parse(localStorage.getItem(AUTH_FAILS)||"null");
-  if(prev && prev.count>=2){ // 3rd fail triggers 15m lock
-    const until = Date.now() + 15*60*1000;
-    localStorage.setItem(AUTH_FAILS, JSON.stringify({count:prev.count+1, until}));
-  } else {
-    localStorage.setItem(AUTH_FAILS, JSON.stringify({count:(prev?.count||0)+1}));
-  }
-}
-function handleLogin(username,password,remember){
-  const lock = checkLock(); if(lock){ const mins=Math.ceil((lock.until-Date.now())/60000); alert(`Too many attempts. Try again in ${mins} min.`); return false; }
-  if(username===AUTH_USER && password===AUTH_PASS){
-    if(remember){ localStorage.setItem(AUTH_PERSIST,"1"); } else { sessionStorage.setItem(AUTH_SESSION,"1"); }
-    localStorage.removeItem(AUTH_FAILS);
-    return true;
-  }
-  recordFail(); alert("Invalid credentials"); return false;
-}
-function isAuthed(){ return localStorage.getItem(AUTH_PERSIST)==="1" || sessionStorage.getItem(AUTH_SESSION)==="1"; }
-function logout(){ localStorage.removeItem(AUTH_PERSIST); sessionStorage.removeItem(AUTH_SESSION); }
-
-function LoginScreen({ onSuccess }){
-  useLora();
-  const [u,setU]=useState(""); const [p,setP]=useState(""); const [remember,setRemember]=useState(true);
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-[#eb2a2a] to-[#fca11c] flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
-        <div className="flex items-center gap-3 mb-4">
-          <img src={ICON_PATH} alt="Proago" className="w-10 h-10 rounded-full"/>
-          <div>
-            <h1 className="text-xl font-bold" style={{color:BRAND_COLORS.primary, fontFamily:'Lora, serif'}}>Proago Recruitment</h1>
-            <p className="text-xs text-slate-500">Luxembourg • EU‑compliant</p>
-          </div>
-        </div>
-        <div className="grid gap-3">
-          <Field label="Username"><Input value={u} onChange={e=>setU(e.target.value)} placeholder="Administrator"/></Field>
-          <Field label="Password"><Input type="password" value={p} onChange={e=>setP(e.target.value)} placeholder="Sergio R4mos"/></Field>
-          <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)}/> Remember me</label>
-          <Button onClick={()=>{ if(handleLogin(u,p,remember)) onSuccess(); }} className="justify-center"><LogOut className="w-4 h-4"/> Enter</Button>
-        </div>
-        <p className="text-xs text-slate-500 mt-4">3 failed attempts lock for 15 minutes.</p>
-      </div>
-    </div>
-  );
-}
-
-// ——— Main App ———
-export default function App(){
-  useLora();
-  const [candidates,setCandidates] = useState(loadCandidates());
-  const [showSettings,setShowSettings] = useState(false);
-  const [settings,setSettings] = useSettings();
-  const [authed,setAuthed] = useState(isAuthed());
-
-  useEffect(()=>{ saveCandidates(candidates); },[candidates]);
-
-  // Add Lead form
-  const [leadForm,setLeadForm] = useState({ firstName:"", lastName:"", phone:"", callsQty:0, callAttempts:1, leadResult:"Pending" });
   const addLead = () => {
-    const f = leadForm; if(!f.firstName && !f.lastName && !f.phone) { alert("Enter at least a name or phone"); return; }
-    const newLead = { id:uid(), stage:STAGES.LEAD, createdAt:nowISO(), firstName:f.firstName.trim(), lastName:f.lastName.trim(), phone:f.phone.trim(), callsQty:Number(f.callsQty)||0, callAttempts:Number(f.callAttempts)||1, leadResult:f.leadResult||"Pending" };
-    setCandidates(prev => [newLead, ...prev]); // accumulate
-    setLeadForm({ firstName:"", lastName:"", phone:"", callsQty:0, callAttempts:1, leadResult:"Pending" });
+    if (!draft.name.trim()) return;
+    const lead = { id: crypto.randomUUID(), ...draft };
+    const next = { ...data, leads: [lead, ...data.leads] };
+    savePipe(next);
+    setDraft({ name: "", phone: "", source: "Indeed", notes: "", crew: "" });
+    setCreateOpen(false);
   };
 
-  // CRUD helpers
-  const updateCandidate = (id, patch) => setCandidates(prev => prev.map(x => x.id===id? {...x, ...patch} : x));
-  const removeCandidate = (id) => setCandidates(prev => prev.filter(x => x.id!==id));
-
-  const leads = useMemo(()=>candidates.filter(c=>c.stage===STAGES.LEAD),[candidates]);
-  const interviews = useMemo(()=>candidates.filter(c=>c.stage===STAGES.INTERVIEW),[candidates]);
-  const formations = useMemo(()=>candidates.filter(c=>c.stage===STAGES.FORMATION),[candidates]);
-
-  if(!authed) return <LoginScreen onSuccess={()=>setAuthed(true)}/>;
-
   return (
-    <div className="min-h-screen bg-gradient-to-b from-[#eb2a2a] to-[#fca11c]">
-      <div className="max-w-7xl mx-auto p-4">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-3 mb-4">
-          <div className="flex items-center gap-3">
-            <img src={ICON_PATH} alt="Proago" className="w-10 h-10 rounded-full"/>
-            <h1 className="text-2xl md:text-3xl font-bold" style={{color:BRAND_COLORS.primary, fontFamily:'Lora, serif'}}>Proago Recruitment</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <GhostButton onClick={()=>setShowSettings(true)}><SettingsIcon className="w-4 h-4"/>Settings</GhostButton>
-            <GhostButton onClick={()=>{ logout(); setAuthed(false); }}><LogOut className="w-4 h-4"/>Logout</GhostButton>
-          </div>
-        </div>
-
-        {/* Add Lead + Import/Export */}
-        <SectionCard title="Add new lead" subtitle="Enter only what you have; blanks are OK" right={
-          <div className="flex items-center gap-2">
-            <label className="inline-flex items-center gap-2 cursor-pointer"><Upload className="w-4 h-4"/><span className="text-sm">Import CSV</span><input type="file" accept=".csv" className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(f) importCSVFile(f,setCandidates); }}/></label>
-            <label className="inline-flex items-center gap-2 cursor-pointer"><Upload className="w-4 h-4"/><span className="text-sm">Import Indeed JSON</span><input type="file" accept=".json" className="hidden" onChange={e=>{ const f=e.target.files?.[0]; if(f) importIndeedJSONFile(f,setCandidates); }}/></label>
-            <GhostButton onClick={()=>{ const csv=toCSV(candidates); const blob=new Blob([csv],{type:"text/csv"}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='proago-export.csv'; a.click(); URL.revokeObjectURL(url); }}><Download className="w-4 h-4"/>Export CSV</GhostButton>
-          </div>
-        }>
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
-            <Field label="First name"><Input value={leadForm.firstName} onChange={e=>setLeadForm(s=>({...s,firstName:e.target.value}))}/></Field>
-            <Field label="Last name"><Input value={leadForm.lastName} onChange={e=>setLeadForm(s=>({...s,lastName:e.target.value}))}/></Field>
-            <Field label="Phone"><Input value={leadForm.phone} onChange={e=>setLeadForm(s=>({...s,phone:e.target.value}))}/></Field>
-            <Field label="Calls qty"><Input type="number" min={0} value={leadForm.callsQty} onChange={e=>setLeadForm(s=>({...s,callsQty:Number(e.target.value)||0}))}/></Field>
-            <Field label="Attempts (1/2/3)"><Select value={String(leadForm.callAttempts)} onChange={e=>setLeadForm(s=>({...s,callAttempts:Number(e.target.value)||1}))}><option value="1">1</option><option value="2">2</option><option value="3">3</option></Select></Field>
-            <Field label="Lead result"><Select value={leadForm.leadResult} onChange={e=>setLeadForm(s=>({...s,leadResult:e.target.value}))}><option>Pending</option><option>Yes</option><option>No</option></Select></Field>
-          </div>
-          <div className="mt-3 text-right"><Button onClick={addLead}><Plus className="w-4 h-4"/>Add lead</Button></div>
-        </SectionCard>
-
-        {/* Pipeline columns */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
-          <SectionCard title={`Leads (${leads.length})`}>
-            <div className="space-y-3">
-              {leads.map(c => (
-                <LeadCard key={c.id} c={c}
-                  onUpdate={(patch)=>updateCandidate(c.id,patch)}
-                  onDelete={()=>removeCandidate(c.id)}
-                  onPromote={()=>updateCandidate(c.id,{stage:STAGES.INTERVIEW})}
-                />
-              ))}
-              {leads.length===0 && <div className="text-sm text-slate-500">No leads yet.</div>}
-            </div>
-          </SectionCard>
-
-          <SectionCard title={`Interviews (${interviews.length})`}>
-            <div className="space-y-3">
-              {interviews.map(c => (
-                <InterviewCard key={c.id} c={c}
-                  onUpdate={(patch)=>updateCandidate(c.id,patch)}
-                  onDelete={()=>removeCandidate(c.id)}
-                />
-              ))}
-              {interviews.length===0 && <div className="text-sm text-slate-500">No interviews yet.</div>}
-            </div>
-          </SectionCard>
-
-          <SectionCard title={`Formation (${formations.length})`}>
-            <div className="space-y-3">
-              {formations.map(c => (
-                <FormationCard key={c.id} c={c}
-                  onUpdate={(patch)=>updateCandidate(c.id,patch)}
-                  onDelete={()=>removeCandidate(c.id)}
-                />
-              ))}
-              {formations.length===0 && <div className="text-sm text-slate-500">No formation entries yet.</div>}
-            </div>
-          </SectionCard>
-        </div>
+    <div className="grid gap-6">
+      <SectionTitle icon={ListChecks} title="Pipeline" right={<Button onClick={() => setCreateOpen(true)}><Plus className="h-4 w-4 mr-1" />Add Lead</Button>} />
+      <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
+        {(["leads", "interview", "formation", "bin"]).map((col) => (
+          <Card key={col} className="border-2">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span className="capitalize">{col}</span>
+                <Badge variant={col === "bin" ? "destructive" : "default"}>{data[col].length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <PipelineTable
+                items={data[col]}
+                onMove={move}
+                onDelete={del}
+                prev={col === "leads" ? null : col === "interview" ? "leads" : col === "formation" ? "interview" : "formation"}
+                next={col === "bin" ? null : col === "formation" ? "bin" : col === "interview" ? "formation" : "interview"}
+              />
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
-      <SettingsModal open={showSettings} onClose={()=>setShowSettings(false)} settings={settings} setSettings={setSettings} onExportCSV={()=>{ const csv=toCSV(candidates); const blob=new Blob([csv],{type:"text/csv"}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='proago-export.csv'; a.click(); URL.revokeObjectURL(url); }} />
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Lead</DialogTitle>
+            <DialogDescription>Add a new candidate lead.</DialogDescription>
+          </DialogHeader>
+          <div className="grid md:grid-cols-2 gap-3">
+            <Field label="Full name"><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></Field>
+            <Field label="Phone"><Input value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} /></Field>
+            <Field label="Source">
+              <Select value={draft.source} onValueChange={(v) => setDraft({ ...draft, source: v })}>
+                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Indeed">Indeed</SelectItem>
+                  <SelectItem value="Street">Street</SelectItem>
+                  <SelectItem value="Referral">Referral</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Crew code (optional)"><Input value={draft.crew} onChange={(e) => setDraft({ ...draft, crew: e.target.value.toUpperCase() })} /></Field>
+            <div className="md:col-span-2"><Field label="Notes"><Input value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></Field></div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button onClick={addLead} style={{ background: BRAND.primary }}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+};
+
+// --------------------------------------------------
+// Recruiters
+// --------------------------------------------------
+const roles = ["Rookie", "Promoter", "Pool Captain", "Team Captain", "Manager"];
+
+const RecruitersPage = () => {
+  const [recs, setRecs] = useState(load(K.recruiters, seedRecruiters));
+  const [open, setOpen] = useState(false);
+  const [edit, setEdit] = useState(null);
+
+  useEffect(() => save(K.recruiters, recs), [recs]);
+
+  const upsert = () => {
+    if (!edit?.name) return;
+    setRecs((prev) => {
+      const exists = prev.some((r) => r.id === edit.id);
+      const next = exists ? prev.map((r) => (r.id === edit.id ? edit : r)) : [{ ...edit, id: crypto.randomUUID() }, ...prev];
+      return next;
+    });
+    setOpen(false);
+    setEdit(null);
+  };
+
+  const del = (id) => setRecs((prev) => prev.filter((r) => r.id !== id));
+
+  const exportJSON = () => {
+    const blob = new Blob([JSON.stringify(recs, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `recruiters_${formatDateISO(new Date())}.json`; a.click(); URL.revokeObjectURL(url);
+  };
+
+  const importJSON = (file) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      try { const data = JSON.parse(fr.result); if (Array.isArray(data)) setRecs(data); } catch {}
+    };
+    fr.readAsText(file);
+  };
+
+  return (
+    <div className="grid gap-6">
+      <SectionTitle icon={Users} title="Recruiters" right={
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={exportJSON}><Download className="h-4 w-4 mr-1" />Export</Button>
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input type="file" accept="application/json" className="hidden" onChange={(e) => e.target.files?.[0] && importJSON(e.target.files[0])} />
+            <span className="px-3 py-2 border rounded-md inline-flex items-center"><Upload className="h-4 w-4 mr-1" />Import</span>
+          </label>
+          <Button onClick={() => { setEdit({ name: "", crewCode: "", role: "Rookie", avg: 1.0, allTime: 0 }); setOpen(true); }}><Plus className="h-4 w-4 mr-1" />Add</Button>
+        </div>
+      } />
+
+      <div className="overflow-x-auto border rounded-xl">
+        <table className="min-w-full text-sm">
+          <thead className="bg-zinc-50">
+            <tr>
+              <th className="text-left p-3">Name</th>
+              <th className="text-left p-3">Crew</th>
+              <th className="text-left p-3">Role</th>
+              <th className="text-right p-3">Avg</th>
+              <th className="text-right p-3">All‑time</th>
+              <th className="text-right p-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recs.map((r) => (
+              <tr key={r.id} className="border-t">
+                <td className="p-3 font-medium">{r.name}</td>
+                <td className="p-3"><Badge>{r.crewCode}</Badge></td>
+                <td className="p-3">{r.role}</td>
+                <td className="p-3 text-right">{Number(r.avg).toFixed(2)}</td>
+                <td className="p-3 text-right">{r.allTime}</td>
+                <td className="p-3">
+                  <div className="flex gap-2 justify-end">
+                    <Button variant="outline" size="sm" onClick={() => { setEdit(r); setOpen(true); }}>Edit</Button>
+                    <Button variant="destructive" size="sm" onClick={() => del(r.id)}><Trash2 className="h-4 w-4" /></Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{edit?.id ? "Edit recruiter" : "New recruiter"}</DialogTitle>
+          </DialogHeader>
+          {edit && (
+            <div className="grid md:grid-cols-2 gap-3">
+              <Field label="Name"><Input value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
+              <Field label="Crew code"><Input value={edit.crewCode} onChange={(e) => setEdit({ ...edit, crewCode: e.target.value.toUpperCase() })} /></Field>
+              <Field label="Role">
+                <Select value={edit.role} onValueChange={(v) => setEdit({ ...edit, role: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {roles.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Average (sales/day)"><Input type="number" step="0.1" value={edit.avg} onChange={(e) => setEdit({ ...edit, avg: Number(e.target.value) })} /></Field>
+              <Field label="All‑time sales"><Input type="number" value={edit.allTime} onChange={(e) => setEdit({ ...edit, allTime: Number(e.target.value) })} /></Field>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={upsert} style={{ background: BRAND.primary }}><Check className="h-4 w-4 mr-1"/>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+// --------------------------------------------------
+// Planning (teams, one shift/day, weekly cap 5, weekly/day averages)
+// --------------------------------------------------
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const sanitizeDay = (val) => {
+  if (!val || typeof val !== "object") return { A: null, B: null };
+  return { A: val.A ?? null, B: val.B ?? null };
+};
+
+const useWeek = () => {
+  const [anchor, setAnchor] = useState(startOfWeekMonday());
+  const weekStartISO = formatDateISO(anchor);
+  const weekLabel = `${formatDateISO(anchor)} → ${formatDateISO(addDays(anchor, 6))}`;
+  const nextWeek = () => setAnchor(addDays(anchor, 7));
+  const prevWeek = () => setAnchor(addDays(anchor, -7));
+  const days = DAYS.map((_, i) => formatDateISO(addDays(anchor, i)));
+  return { weekStartISO, weekLabel, days, nextWeek, prevWeek };
+};
+
+const PlanningPage = () => {
+  const recs = load(K.recruiters, seedRecruiters);
+  const { weekStartISO, weekLabel, days, nextWeek, prevWeek } = useWeek();
+  const [store, setStore] = useState(load(K.planning, {})); // { [weekStartISO]: { assignments, metrics } }
+  const [picker, setPicker] = useState({ open: false, day: null, team: null });
+  const rawWeek = store[weekStartISO] || { assignments: {}, metrics: {} };
+
+  // Normalize the shape defensively in case of older/corrupt data
+  const assignments = useMemo(() => {
+    const base = {};
+    days.forEach((d) => (base[d] = { A: null, B: null }));
+    const merged = { ...base };
+    const src = rawWeek.assignments || {};
+    Object.keys(base).forEach((d) => (merged[d] = sanitizeDay(src[d])));
+    return merged;
+  }, [rawWeek.assignments, days]);
+
+  const metrics = useMemo(() => ({ ...(rawWeek.metrics || {}) }), [rawWeek.metrics]);
+
+  // Count assigned shifts per recruiter (defensive against undefined days)
+  const assignedCounts = useMemo(() => {
+    return Object.values(assignments).reduce((acc, dayObj) => {
+      const safe = sanitizeDay(dayObj);
+      ["A", "B"].forEach((t) => {
+        const id = safe[t];
+        if (id) acc[id] = (acc[id] || 0) + 1;
+      });
+      return acc;
+    }, {});
+  }, [assignments]);
+
+  const savePlanning = (next) => {
+    const payload = { ...store, [weekStartISO]: next };
+    setStore(payload);
+    save(K.planning, payload);
+  };
+
+  const openPicker = (day, team) => setPicker({ open: true, day, team });
+  const closePicker = () => setPicker({ open: false, day: null, team: null });
+
+  const canAssign = (recId, day) => {
+    if (!day) return true; // dialog render safety
+    const pair = sanitizeDay(assignments[day]);
+    // One shift per day per recruiter
+    const dayTaken = [pair.A, pair.B].includes(recId);
+    if (dayTaken) return false;
+    // Weekly cap 5
+    const weekly = assignedCounts[recId] || 0;
+    if (weekly >= 5) return false;
+    return true;
+  };
+
+  const assign = (recId) => {
+    if (!picker.day || !picker.team) return;
+    if (!canAssign(recId, picker.day)) return;
+    const dayObj = sanitizeDay(assignments[picker.day]);
+    const next = {
+      assignments: {
+        ...assignments,
+        [picker.day]: { ...dayObj, [picker.team]: recId },
+      },
+      metrics,
+    };
+    savePlanning(next);
+    closePicker();
+  };
+
+  const unassign = (day, team) => {
+    const dayObj = sanitizeDay(assignments[day]);
+    const next = {
+      assignments: {
+        ...assignments,
+        [day]: { ...dayObj, [team]: null },
+      },
+      metrics,
+    };
+    savePlanning(next);
+  };
+
+  const setMetric = (day, team, field, value) => {
+    const key = `${day}_${team}`;
+    const next = {
+      assignments,
+      metrics: { ...metrics, [key]: { ...(metrics[key] || {}), [field]: value } },
+    };
+    savePlanning(next);
+  };
+
+  const teamRow = (day) => (
+    <tr key={day} className="border-t">
+      <td className="p-3 font-medium text-sm whitespace-nowrap w-28">{day}</td>
+      {["A", "B"].map((team) => {
+        const pair = sanitizeDay(assignments[day]);
+        const recId = pair[team];
+        const rec = recs.find((r) => r.id === recId);
+        const key = `${day}_${team}`;
+        const m = metrics[key] || {};
+        const avg = Number(m.avg ?? (rec?.avg ?? 0));
+        const sales = Number(m.sales ?? 0);
+        return (
+          <td key={team} className="p-3">
+            <div className="grid gap-2">
+              <div className="flex items-center justify-between">
+                <Badge variant="secondary">Team {team}</Badge>
+                {recId ? (
+                  <Button size="xs" variant="outline" onClick={() => unassign(day, team)}>Unassign</Button>
+                ) : (
+                  <Button size="xs" onClick={() => openPicker(day, team)}>Assign</Button>
+                )}
+              </div>
+              <div className="flex items-center justify-between border rounded-lg p-2">
+                <div>
+                  <div className="text-sm">{rec ? rec.name : <span className="text-muted-foreground">— unassigned —</span>}</div>
+                  {rec && <div className="text-xs text-muted-foreground">{rec.role} • {rec.crewCode}</div>}
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-muted-foreground">Avg</div>
+                  <Input className="h-8 w-20 text-right" type="number" step="0.1" value={avg}
+                         onChange={(e) => setMetric(day, team, "avg", Number(e.target.value))} />
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-muted-foreground">Sales</div>
+                  <Input className="h-8 w-20 text-right" type="number" value={sales}
+                         onChange={(e) => setMetric(day, team, "sales", Number(e.target.value))} />
+                </div>
+              </div>
+            </div>
+          </td>
+        );
+      })}
+    </tr>
+  );
+
+  const totals = useMemo(() => {
+    // compute daily & weekly aggregates from metrics
+    const dayTotals = days.reduce((acc, d) => {
+      const sums = ["A", "B"].map((t) => metrics[`${d}_${t}`] || {});
+      const sales = sums.reduce((s, x) => s + Number(x.sales || 0), 0);
+      const avg = sums.reduce((s, x) => s + Number(x.avg || 0), 0);
+      acc[d] = { sales, avg };
+      return acc;
+    }, {});
+    const weeklySales = Object.values(dayTotals).reduce((s, x) => s + x.sales, 0);
+    const weeklyAvg = Object.values(dayTotals).reduce((s, x) => s + x.avg, 0);
+    return { dayTotals, weeklySales, weeklyAvg };
+  }, [metrics, days]);
+
+  const exportWeek = () => {
+    const payload = { weekStartISO, assignments, metrics };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `planning_${weekStartISO}.json`; a.click(); URL.revokeObjectURL(url);
+  };
+
+  const importWeek = (file) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      try {
+        const data = JSON.parse(fr.result);
+        const rawA = data.assignments || {};
+        // sanitize imported structure
+        const fixed = {};
+        days.forEach((d) => { fixed[d] = sanitizeDay(rawA[d]); });
+        savePlanning({ assignments: fixed, metrics: data.metrics || {} });
+      } catch {}
+    };
+    fr.readAsText(file);
+  };
+
+  // Runtime sanity checks (pseudo-tests) to catch shape issues in dev
+  useEffect(() => {
+    const anyBad = Object.entries(assignments).some(([d, v]) => !v || typeof v !== "object" || !("A" in v) || !("B" in v));
+    console.assert(!anyBad, "Planning assignments contained invalid day objects and were sanitized.");
+  }, [assignments]);
+
+  return (
+    <div className="grid gap-6">
+      <SectionTitle icon={CalendarClock} title="Planning" right={
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={prevWeek}><ChevronLeft className="h-4 w-4"/></Button>
+          <div className="px-3 py-2 border rounded-md text-sm bg-zinc-50">{weekLabel}</div>
+          <Button variant="outline" onClick={nextWeek}><ChevronRight className="h-4 w-4"/></Button>
+          <Button variant="outline" onClick={exportWeek}><Download className="h-4 w-4 mr-1"/>Export week</Button>
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input type="file" accept="application/json" className="hidden" onChange={(e) => e.target.files?.[0] && importWeek(e.target.files[0])} />
+            <span className="px-3 py-2 border rounded-md inline-flex items-center"><Upload className="h-4 w-4 mr-1"/>Import</span>
+          </label>
+        </div>
+      } />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Week overview</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto border rounded-xl">
+            <table className="min-w-full text-sm">
+              <thead className="bg-zinc-50">
+                <tr>
+                  <th className="text-left p-3 w-28">Date</th>
+                  <th className="text-left p-3">Team A</th>
+                  <th className="text-left p-3">Team B</th>
+                </tr>
+              </thead>
+              <tbody>
+                {days.map((d) => teamRow(d))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t bg-zinc-50">
+                  <td className="p-3 font-semibold">Totals</td>
+                  <td className="p-3" colSpan={2}>
+                    <div className="flex flex-wrap gap-4 text-sm">
+                      {days.map((d) => (
+                        <div key={d} className="px-2 py-1 border rounded-md bg-white">
+                          <span className="font-medium mr-2">{d.slice(5)}</span>
+                          <span className="text-muted-foreground">Sales: {totals.dayTotals[d]?.sales ?? 0}</span>
+                          <span className="mx-2">•</span>
+                          <span className="text-muted-foreground">Avg: {(totals.dayTotals[d]?.avg ?? 0).toFixed?.(1) ?? Number(totals.dayTotals[d]?.avg ?? 0).toFixed(1)}</span>
+                        </div>
+                      ))}
+                      <div className="px-2 py-1 border rounded-md bg-white font-semibold">Weekly Sales: {totals.weeklySales}</div>
+                      <div className="px-2 py-1 border rounded-md bg-white font-semibold">Weekly Avg Sum: {totals.weeklyAvg.toFixed(1)}</div>
+                    </div>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Weekly cap tracking (max 5 shifts / recruiter)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {recs.map((r) => (
+              <div key={r.id} className="border rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <div className="font-medium">{r.name}</div>
+                  <div className="text-xs text-muted-foreground">{r.role} • {r.crewCode}</div>
+                </div>
+                <Badge variant={(assignedCounts[r.id] || 0) >= 5 ? "destructive" : "secondary"}>{assignedCounts[r.id] || 0} / 5</Badge>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={picker.open} onOpenChange={(o) => !o && closePicker()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assign recruiter</DialogTitle>
+            {picker.day && <DialogDescription>Pick a recruiter for {picker.day} (Team {picker.team}). One shift/day. Weekly cap 5.</DialogDescription>}
+          </DialogHeader>
+          <div className="grid gap-2 max-h-[50vh] overflow-auto">
+            {recs.map((r) => {
+              const weekly = assignedCounts[r.id] || 0;
+              const pair = sanitizeDay(assignments[picker.day] || {});
+              const dayTaken = [pair.A, pair.B].includes(r.id);
+              const blocked = weekly >= 5 || dayTaken;
+              const onPick = () => {
+                if (weekly >= 5) { alert("This recruiter reached the weekly cap (5)."); return; }
+                if (dayTaken) { alert("This recruiter is already assigned on this day."); return; }
+                assign(r.id);
+              };
+              return (
+                <button key={r.id} onClick={onPick}
+                        title={weekly >= 5 ? "Reached weekly cap" : dayTaken ? "Already assigned this day" : "Assign"}
+                        className={`text-left px-3 py-2 rounded-lg border flex items-center justify-between ${blocked ? "opacity-50 cursor-not-allowed" : "hover:bg-zinc-50"}`}>
+                  <div>
+                    <div className="font-medium">{r.name}</div>
+                    <div className="text-xs text-muted-foreground">{r.role} • {r.crewCode}</div>
+                  </div>
+                  <div className="text-right text-xs">
+                    <div>Avg {Number(r.avg).toFixed(1)}</div>
+                    <div>
+                      <Badge variant={weekly >= 5 ? "destructive" : "secondary"}>
+                        {weekly} / 5{weekly >= 5 ? " (cap)" : ""}
+                      </Badge>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closePicker}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+// --------------------------------------------------
+// Root App
+// --------------------------------------------------
+export default function App() {
+  const [authed, setAuthed] = useState(false);
+  const [tab, setTab] = useState("planning");
+
+  useEffect(() => { ensureDefaults(); }, []);
+
+  const logout = () => { sessionStorage.removeItem(AUTH_SESSION_KEY); setAuthed(false); };
+
+  if (!authed) return <AuthGate onAuthed={() => setAuthed(true)} />;
+
+  return (
+    <Shell tab={tab} setTab={setTab} onLogout={logout}>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsContent value="leads"><PipelinePage /></TabsContent>
+        <TabsContent value="interview"><PipelinePage /></TabsContent>
+        <TabsContent value="formation"><PipelinePage /></TabsContent>
+        <TabsContent value="bin"><PipelinePage /></TabsContent>
+        <TabsContent value="recruiters"><RecruitersPage /></TabsContent>
+        <TabsContent value="planning"><PlanningPage /></TabsContent>
+      </Tabs>
+    </Shell>
   );
 }
