@@ -539,10 +539,10 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
   const weekObj = planning[weekStart]?.days ? planning[weekStart] : { days: {} };
   const weekNum = weekNumberISO(parseISO(weekStart));
 
-  // Ensure structure exists ONCE per week change
-  useEffect(() => {
-    setPlanning((p) => (p[weekStart] ? p : ensureWeek(p, weekStart)));
-  }, [weekStart, setPlanning]);
+  // Always ensure the week exists when weekStart changes
+useEffect(() => {
+  setPlanning((p) => ensureWeek(p || {}, weekStart));
+}, [weekStart, setPlanning]);
 
   // Helpers
   const rById = (id) => recruiters.find((r) => r.id === id);
@@ -753,7 +753,10 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
       </div>
 
       {/* Edit Day modal */}
-      <Dialog open={!!editDateISO} onOpenChange={closeEditDay}>
+     <Dialog
+  open={!!editDateISO}
+  onOpenChange={(open) => { if (!open) closeEditDay(); }}
+>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Edit Day — {fmtUK(editDateISO || "")}</DialogTitle>
