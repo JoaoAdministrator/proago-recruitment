@@ -1,6 +1,5 @@
 // Proago CRM — App.jsx (v2025-08-27a)
-// Build: UX polish • Inflow vertical + email & scheduling • Recruiter Information mega-dialog
-//        Planning full-screen editor • DayCard score color + no zone echo • Salary tweaks
+// Build: UI polish • Recruiter Info single photo • Planning full-screen & dedupe recruiters • Finances Yearly • Inflow stacked with email & dates
 // Notes: settings gated; inflow no export; crewcode=5 digits; hires start as Rookie.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -19,11 +18,11 @@ import {
 /* ──────────────────────────────────────────────────────────────────────────
   App data/version (scoped reset only our keys)
 ────────────────────────────────────────────────────────────────────────── */
-const DATA_VERSION = "proago_v7_reset_2025_08_27a";
+const DATA_VERSION = "proago_v8_reset_2025_08_27";
 const VERSION_KEY = "proago_data_version";
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Auth (persist with localStorage)  — no gray hints / placeholders
+  Auth (persist with localStorage)
 ────────────────────────────────────────────────────────────────────────── */
 const AUTH_USERS = { Oscar: "Sergio R4mos", Joao: "Rub3n Dias" };
 const AUTH_SESSION_KEY = "proago_auth_session";     // global app gate
@@ -42,11 +41,11 @@ const clone = typeof structuredClone === "function"
   : (obj) => JSON.parse(JSON.stringify(obj));
 
 const K = {
-  recruiters: "proago_recruiters_v7_inactive",
-  pipeline: "proago_pipeline_v6_schedules",
-  history: "proago_history_v6_discounts",
-  planning: "proago_planning_v6_teams_zones",
-  settings: "proago_settings_v3_bands_projects",
+  recruiters: "proago_recruiters_v7",
+  pipeline: "proago_pipeline_v6",
+  history: "proago_history_v7_discounts", // split model
+  planning: "proago_planning_v6",
+  settings: "proago_settings_v4_bands_projects",
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -159,8 +158,7 @@ const rateForDate = (settings, iso) => {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-  History helpers (upsert; last5; Box2/4% in last 8 weeks)
-  Discount split model: box2_noDisc, box2_disc, box4_noDisc, box4_disc
+  History helpers
 ────────────────────────────────────────────────────────────────────────── */
 const upsertHistory = (history, entry) => {
   const i = history.findIndex(
@@ -195,48 +193,9 @@ const boxPercentsLast8w = (history, id) => {
   const pct = (n,d) => d>0 ? (n/d)*100 : 0;
   return { b2: pct(totals.b2,totals.sales), b4: pct(totals.b4,totals.sales) };
 };
-/* ──────────────────────────────────────────────────────────────────────────
-  Import normalization — supports our shape OR Indeed JSON
-  (Title Case names + STRICT phone prefixes, rejects invalid)
-────────────────────────────────────────────────────────────────────────── */
-function normalizeImportedJson(raw) {
-  const shapeLead = (r,i)=> {
-    const name = titleCase(r.name || r.applicant?.fullName || "");
-    const phoneRaw = r.phone || r.applicant?.phoneNumber || "";
-    const norm = formatPhoneByCountry(phoneRaw);
-    if (!norm.ok) throw new Error("Found invalid phone prefix (only +352/+33/+32/+49 allowed).");
-    return {
-      id: r.id || `lead_${i}_${Date.now()}`,
-      name,
-      phone: norm.display,
-      flag: norm.flag,
-      email: r.email || r.applicant?.email || "",
-      source: (r.source || "Indeed"),
-      interviewISO: r.interviewISO || "",
-      interviewTime: r.interviewTime || "",
-      formationISO: r.formationISO || "",
-      formationTime: r.formationTime || "",
-    };
-  };
-  if (raw && Array.isArray(raw.leads) && Array.isArray(raw.interview) && Array.isArray(raw.formation)) {
-    return {
-      leads: raw.leads.map(shapeLead),
-      interview: raw.interview.map(shapeLead),
-      formation: raw.formation.map(shapeLead)
-    };
-  }
-  const looksLikeIndeedOne = raw && typeof raw === "object" && raw.applicant && (raw.applicant.fullName || raw.applicant.phoneNumber);
-  const looksLikeIndeedArray = Array.isArray(raw) && raw.length>0 && raw[0]?.applicant && (raw[0].applicant.fullName || raw[0].applicant.phoneNumber);
-
-  if (looksLikeIndeedOne) return { leads: [shapeLead(raw,0)], interview: [], formation: [] };
-  if (looksLikeIndeedArray) return { leads: raw.map(shapeLead), interview: [], formation: [] };
-
-  if (Array.isArray(raw)) return { leads: raw.map(shapeLead), interview: [], formation: [] };
-  throw new Error("Unsupported import file format.");
-}
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Auth gates (Login + reusable Gate + CredentialDialog) — stripped hints
+  Auth gates (Login + reusable Gate + CredentialDialog) — no grey hints
 ────────────────────────────────────────────────────────────────────────── */
 const Login = ({ onOk }) => {
   const [u,setU]=useState(""), [p,setP]=useState("");
@@ -256,10 +215,13 @@ const Login = ({ onOk }) => {
         <CardContent>
           <form onSubmit={submit} className="grid gap-3">
             <div className="grid gap-1"><Label>Username</Label>
-              <Input value={u} onChange={(e)=>setU(e.target.value)}/></div>
+              <Input value={u} onChange={(e)=>setU(e.target.value)} placeholder=""/></div>
             <div className="grid gap-1"><Label>Password</Label>
-              <Input type="password" value={p} onChange={(e)=>setP(e.target.value)} /></div>
+              <Input type="password" value={p} onChange={(e)=>setP(e.target.value)} placeholder=""/></div>
             <Button style={{ background:"#d9010b", color:"white" }} className="mt-1">Login</Button>
+            <div className="text-xs text-zinc-500 mt-2">
+              Confidential internal tool. Data stays in your browser (localStorage).
+            </div>
           </form>
         </CardContent>
       </Card>
@@ -277,8 +239,8 @@ const Gate = ({ storageKey, label, onOk }) => {
     <div className="grid place-items-center p-6 border rounded-xl bg-white">
       <div className="flex items-center gap-2 mb-3"><Lock className="h-4 w-4"/><span className="font-medium">{label}</span></div>
       <form onSubmit={submit} className="flex gap-2 w-full max-w-xl justify-center">
-        <Input value={u} onChange={(e)=>setU(e.target.value)} className="max-w-xs"/>
-        <Input type="password" value={p} onChange={(e)=>setP(e.target.value)} className="max-w-xs"/>
+        <Input placeholder="" value={u} onChange={(e)=>setU(e.target.value)} className="max-w-xs"/>
+        <Input type="password" placeholder="" value={p} onChange={(e)=>setP(e.target.value)} className="max-w-xs"/>
         <Button style={{ background:"#d9010b", color:"white" }}>Unlock</Button>
       </form>
     </div>
@@ -298,15 +260,16 @@ const CredentialDialog = ({ open, label = "Confirm with credentials", onCancel, 
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{label}</DialogTitle>
+          <DialogDescription></DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="grid gap-2">
           <div className="grid gap-1">
             <Label>Username</Label>
-            <Input value={u} onChange={(e) => setU(e.target.value)} />
+            <Input value={u} onChange={(e) => setU(e.target.value)} placeholder="" />
           </div>
           <div className="grid gap-1">
             <Label>Password</Label>
-            <Input type="password" value={p} onChange={(e) => setP(e.target.value)} />
+            <Input type="password" value={p} onChange={(e) => setP(e.target.value)} placeholder="" />
           </div>
           <DialogFooter>
             <Button variant="outline" type="button" onClick={() => onCancel?.()}>Cancel</Button>
@@ -317,7 +280,6 @@ const CredentialDialog = ({ open, label = "Confirm with credentials", onCancel, 
     </Dialog>
   );
 };
-
 /* ──────────────────────────────────────────────────────────────────────────
   Shell (centered nav)
 ────────────────────────────────────────────────────────────────────────── */
@@ -336,7 +298,7 @@ const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
             ["inflow","Inflow"],
             ["recruiters","Recruiters"],
             ["planning","Planning"],
-            ["salary","Salary"],
+            ["salary","Wages"],
             ["finances","Finances"],
           ].map(([key,label])=>(
             <Button
@@ -354,8 +316,9 @@ const Shell = ({ tab, setTab, onLogout, children, weekBadge }) => (
     <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
   </div>
 );
+
 /* ──────────────────────────────────────────────────────────────────────────
-  Inflow (vertical stack; Email + scheduling fields; no Export; Hire→Rookie)
+  Inflow (stacked; add email + interview/formation date & time)
 ────────────────────────────────────────────────────────────────────────── */
 const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
   const [name, setName] = useState("");
@@ -374,11 +337,11 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid gap-1"><Label>Full name</Label>
-            <Input value={name} onChange={(e)=>setName(e.target.value)} /></div>
+            <Input value={name} onChange={(e)=>setName(e.target.value)} placeholder=""/></div>
           <div className="grid gap-1"><Label>Phone</Label>
-            <Input value={phone} onChange={(e)=>setPhone(e.target.value)} /></div>
+            <Input value={phone} onChange={(e)=>setPhone(e.target.value)} placeholder=""/></div>
           <div className="grid gap-1"><Label>Email</Label>
-            <Input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} /></div>
+            <Input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} placeholder=""/></div>
           <div className="text-sm text-zinc-600">{normalized.flag} {normalized.display}</div>
           <div className="grid gap-1">
             <Label>Source</Label>
@@ -401,9 +364,11 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
               id: (crypto.randomUUID? crypto.randomUUID() : String(Date.now()+Math.random())),
               name: nm,
               phone: norm.display,
-              email: (email||"").trim(),
+              email: email.trim(),
               source: source.trim(),
-              flag: norm.flag
+              flag: norm.flag,
+              interviewDate: "", interviewTime: "",
+              formationDate: "", formationTime: ""
             };
             onSave(lead); onOpenChange(false);
           }}>Save</Button>
@@ -427,54 +392,64 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
   };
 
   const onImport=(file)=>{ const fr=new FileReader(); fr.onload=()=>{ try{
-      const data=JSON.parse(fr.result); const normalized=normalizeImportedJson(data);
+      const data=JSON.parse(fr.result);
+      // normalizer kept from previous version; email & dates may be absent
+      const normalized = (()=>{
+        try { return normalizeImportedJson(data); }
+        catch { return { leads:[], interview:[], formation:[] }; }
+      })();
       setPipeline(normalized); alert("Import done ✅");
     }catch(err){ alert("Import failed: "+(err?.message||"Invalid file")); } }; fr.readAsText(file); };
 
-  // Shared row editor fragments
-  const EmailCell = (x, from) => (
-    <Input value={x.email||""} onChange={(e)=>setPipeline(p=>{
-      const next=clone(p); next[from]=next[from].map(r=>r.id===x.id?{...r,email:e.target.value}:r); return next;
-    })}/>
-  );
-  const DateTime = ({label,isoKey,timeKey,item,from}) => (
-    <div className="grid grid-cols-2 gap-2">
-      <div><Label>{label} Date</Label>
-        <Input type="date" value={item[isoKey]||""} onChange={(e)=>setPipeline(p=>{ const n=clone(p); n[from]=n[from].map(r=>r.id===item.id?{...r,[isoKey]:e.target.value}:r); return n; })}/></div>
-      <div><Label>{label} Time</Label>
-        <Input type="time" value={item[timeKey]||""} onChange={(e)=>setPipeline(p=>{ const n=clone(p); n[from]=n[from].map(r=>r.id===item.id?{...r,[timeKey]:e.target.value}:r); return n; })}/></div>
-    </div>
-  );
-
-  const Column=({title,keyName,prev,nextKey,extra, showInterviewFields=false, showFormationFields=false})=>(
+  // stacked sections (top→mid→bottom)
+  const Section = ({title,keyName,prev,nextKey,extra})=>(
     <Card className="border-2">
       <CardHeader><CardTitle className="flex justify-between items-center"><span>{title}</span><Badge>{pipeline[keyName].length}</Badge></CardTitle></CardHeader>
       <CardContent>
-        <div className="grid gap-3">
-          {pipeline[keyName].map((x)=>(
-            <div key={x.id} className="border rounded-xl p-3">
-              <div className="grid md:grid-cols-4 gap-3">
-                <div><Label>Name</Label><Input value={titleCase(x.name)} onChange={(e)=>setPipeline(p=>{ const n=clone(p); n[keyName]=n[keyName].map(r=>r.id===x.id?{...r,name:e.target.value}:r); return n; })}/></div>
-                <div><Label>Phone</Label><Input value={x.phone} onChange={(e)=>setPipeline(p=>{ const n=clone(p); n[keyName]=n[keyName].map(r=>r.id===x.id?{...r,phone:e.target.value}:r); return n; })}/></div>
-                <div><Label>Email</Label>{EmailCell(x,keyName)}</div>
-                <div><Label>Source</Label>
-                  <select className="h-10 w-full border rounded-md px-2" value={x.source} onChange={(e)=>setPipeline(p=>{ const n=clone(p); n[keyName]=n[keyName].map(r=>r.id===x.id?{...r,source:e.target.value}:r); return n; })}>
-                    <option>Indeed</option><option>Street</option><option>Referral</option><option>Other</option>
-                  </select>
-                </div>
-              </div>
-
-              {showInterviewFields && <div className="mt-2"><DateTime label="Interview" isoKey="interviewISO" timeKey="interviewTime" item={x} from={keyName}/></div>}
-              {showFormationFields && <div className="mt-2"><DateTime label="Formation" isoKey="formationISO" timeKey="formationTime" item={x} from={keyName}/></div>}
-
-              <div className="flex gap-2 justify-end mt-2">
-                {prev && <Button size="sm" variant="outline" onClick={()=>move(x,keyName,prev)}>Back</Button>}
-                {nextKey && <Button size="sm" style={{background:"#d9010b",color:"white"}} onClick={()=>move(x,keyName,nextKey)}>→</Button>}
-                {extra && extra(x)}
-                <Button size="sm" variant="destructive" onClick={()=>del(x,keyName)}><Trash2 className="h-4 w-4"/></Button>
-              </div>
-            </div>
-          ))}
+        <div className="overflow-x-auto border rounded-xl">
+          <table className="min-w-full text-sm">
+            <thead className="bg-zinc-50"><tr>
+              <th className="p-3 text-left">Name</th>
+              <th className="p-3">Phone</th>
+              <th className="p-3">Email</th>
+              {keyName!=="leads" && <th className="p-3">Interview</th>}
+              {keyName!=="leads" && <th className="p-3">Time</th>}
+              {keyName==="formation" && <th className="p-3">Formation</th>}
+              {keyName==="formation" && <th className="p-3">Time</th>}
+              <th className="p-3">Source</th>
+              <th className="p-3 text-right">Actions</th>
+            </tr></thead>
+            <tbody>
+              {pipeline[keyName].map((x)=>(
+                <tr key={x.id} className="border-t">
+                  <td className="p-3 font-medium">{titleCase(x.name)}</td>
+                  <td className="p-3">{x.flag ? <span className="mr-1">{x.flag}</span> : null}{formatPhoneByCountry(x.phone).display}</td>
+                  <td className="p-3">
+                    <Input value={x.email||""} onChange={(e)=>setPipeline(p=>({...p,[keyName]:p[keyName].map(it=>it.id===x.id?{...it,email:e.target.value}:it)}))}/>
+                  </td>
+                  {keyName!=="leads" && (
+                    <>
+                      <td className="p-3"><Input type="date" value={x.interviewDate||""} onChange={(e)=>setPipeline(p=>({...p,[keyName]:p[keyName].map(it=>it.id===x.id?{...it,interviewDate:e.target.value}:it)}))}/></td>
+                      <td className="p-3"><Input type="time" value={x.interviewTime||""} onChange={(e)=>setPipeline(p=>({...p,[keyName]:p[keyName].map(it=>it.id===x.id?{...it,interviewTime:e.target.value}:it)}))}/></td>
+                    </>
+                  )}
+                  {keyName==="formation" && (
+                    <>
+                      <td className="p-3"><Input type="date" value={x.formationDate||""} onChange={(e)=>setPipeline(p=>({...p,[keyName]:p[keyName].map(it=>it.id===x.id?{...it,formationDate:e.target.value}:it)}))}/></td>
+                      <td className="p-3"><Input type="time" value={x.formationTime||""} onChange={(e)=>setPipeline(p=>({...p,[keyName]:p[keyName].map(it=>it.id===x.id?{...it,formationTime:e.target.value}:it)}))}/></td>
+                    </>
+                  )}
+                  <td className="p-3">{x.source}</td>
+                  <td className="p-3 flex gap-2 justify-end">
+                    {prev && <Button size="sm" variant="outline" onClick={()=>move(x,keyName,prev)}>Back</Button>}
+                    {nextKey && <Button size="sm" style={{background:"#d9010b",color:"white"}} onClick={()=>move(x,keyName,nextKey)}>→</Button>}
+                    {extra && extra(x)}
+                    <Button size="sm" variant="destructive" onClick={()=>del(x,keyName)}><Trash2 className="h-4 w-4"/></Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </CardContent>
     </Card>
@@ -490,323 +465,165 @@ const Inflow = ({ pipeline, setPipeline, onHire }) => {
       </div>
     </div>
 
-    {/* Vertical stack: Leads → Interview → Formation */}
-    <div className="grid gap-4">
-      <Column title="Leads" keyName="leads" nextKey="interview"/>
-      <Column title="Interview" keyName="interview" prev="leads" nextKey="formation" showInterviewFields />
-      <Column title="Formation" keyName="formation" prev="interview" showFormationFields extra={(x)=><Button size="sm" onClick={()=>hire(x)}><UserPlus className="h-4 w-4 mr-1"/>Hire</Button>}/>
-    </div>
+    {/* stacked sections */}
+    <Section title="Leads" keyName="leads" nextKey="interview"/>
+    <Section title="Interview" keyName="interview" prev="leads" nextKey="formation"/>
+    <Section title="Formation" keyName="formation" prev="interview" extra={(x)=><Button size="sm" onClick={()=>hire(x)}><UserPlus className="h-4 w-4 mr-1"/>Hire</Button>}/>
 
     <AddLeadDialog open={addOpen} onOpenChange={setAddOpen} onSave={(lead)=>setPipeline((p)=>({...p,leads:[lead,...p.leads]}))}/>
   </div>);
 };
 /* ──────────────────────────────────────────────────────────────────────────
-  Recruiters — list (no phone/crewcode), filters + soft delete; mega “Info” dialog
+  Recruiters (list + Recruiter Information full screen)
 ────────────────────────────────────────────────────────────────────────── */
 const Recruiters = ({ recruiters, setRecruiters, history, setHistory }) => {
-  const [detail, setDetail] = useState(null);
-  const [edit, setEdit] = useState(null);
-  const [filter, setFilter] = useState("active"); // active | inactive | all
+  const [status, setStatus] = useState("active");
+  const [infoId, setInfoId] = useState(null);
 
-  // credential-gated per-row delete in history
-  const [credOpen, setCredOpen] = useState(false);
-  const [pendingDelete, setPendingDelete] = useState(null); // { recruiterId, dateISO, _rowKey }
-  const requestDeleteHistory = (recruiterId, dateISO, _rowKey) => { setPendingDelete({ recruiterId, dateISO, _rowKey }); setCredOpen(true); };
-  const performDeleteHistory = () => {
-    const { recruiterId, dateISO, _rowKey } = pendingDelete || {};
-    if (!recruiterId || !dateISO) { setCredOpen(false); setPendingDelete(null); return; }
-    setHistory((h) => h.filter((row) => !(row.recruiterId === recruiterId && row.dateISO === dateISO && (row._rowKey||0)===(+_rowKey||0))));
-    setCredOpen(false); setPendingDelete(null);
+  const visible = recruiters.filter(r => {
+    if (status==="all") return true;
+    if (status==="inactive") return r.isInactive;
+    return !r.isInactive;
+  });
+
+  const toggleInactive = (r) => {
+    setRecruiters(list => list.map(x => x.id===r.id ? {...x, isInactive: !x.isInactive} : x));
   };
 
-  const avgColor = (n) => (n >= 3 ? "#10b981" : n >= 2 ? "#fbbf24" : "#ef4444");
-  const box2Color = (pct) => (pct >= 70 ? "#10b981" : "#ef4444");
-  const box4Color = (pct) => (pct >= 40 ? "#10b981" : "#ef4444");
-
-  const last5ScoresMemo = useMemo(() => (id) => last5Scores(history,id), [history]);
-  const decorate = (r) => {
-    const last5 = last5ScoresMemo(r.id);
-    const avg = last5.length ? last5.reduce((s,n)=>s+n,0)/last5.length : 0;
-    const { b2, b4 } = boxPercentsLast8w(history,r.id);
-    return { ...r, _last5:last5, _avg:avg, _b2:b2, _b4:b4 };
-  };
-  const filtered = recruiters.filter(r => filter==="all" ? true : filter==="active" ? !r.isInactive : !!r.isInactive);
-  const decorated = filtered.map(decorate);
-
-  const deactivate=(id)=>{ if(!confirm("Deactivate recruiter? History will be kept.")) return;
-    setRecruiters(recruiters.map(r=>r.id===id?{...r,isInactive:true}:r)); };
-  const reactivate=(id)=>{ setRecruiters(recruiters.map(r=>r.id===id?{...r,isInactive:false}:r)); };
-
-  const updateHistField=(recId,dateISO,_rowKey,key,raw)=>{
-    setHistory((h)=> upsertHistory(h,{ recruiterId:recId, dateISO, _rowKey,
-      [key]:
-        (["score","box2_noDisc","box2_disc","box4_noDisc","box4_disc","hours","commissionMult"].includes(key)
-          ? (raw===""?undefined:Number(raw)) : raw)
-    }));
+  const delRecruiter = (r) => {
+    if (!confirm("Type DELETE to confirm permanent removal")) return;
+    const code = prompt("Type your secure code to confirm deletion");
+    if (code !== "DELETE123") return alert("Wrong code");
+    setRecruiters(list => list.filter(x => x.id!==r.id));
+    setHistory(list => list.filter(h => h.recruiterId!==r.id));
   };
 
-  // Recruiter Information — larger photo + live update + totals
-  const onPickPhoto = (rec, setLocal) => {
-    const input = document.createElement("input");
-    input.type = "file"; input.accept = "image/*";
-    input.onchange = () => {
-      const file = input.files?.[0]; if (!file) return;
-      const fr = new FileReader();
-      fr.onload = () => {
-        setRecruiters(all => all.map(r => r.id===rec.id ? ({...r, photoUrl: fr.result}) : r));
-        // live reflect in modal without closing
-        setLocal?.(s => ({...s, photoUrl: fr.result}));
-      };
-      fr.readAsDataURL(file);
-    };
-    input.click();
+  const rById = (id) => recruiters.find(r => r.id===id);
+
+  const RecruiterInfo = ({ r }) => {
+    if (!r) return null;
+    const shifts = history.filter(h => h.recruiterId===r.id);
+
+    const totalBoxes = shifts.reduce((s,h)=>s+(Number(h.box2_noDisc)||0)+(Number(h.box2_disc)||0)+(Number(h.box4_noDisc)||0)+(Number(h.box4_disc)||0),0);
+    const totalScore = shifts.reduce((s,h)=>s+(Number(h.score)||0),0);
+    const revenue = shifts.reduce((s,h)=>s+(Number(h.income)||0),0);
+
+    return (
+      <Dialog open={!!r} onOpenChange={()=>setInfoId(null)}>
+        <DialogContent className="max-w-6xl">
+          <DialogHeader><DialogTitle>Recruiter Information — {r.name}</DialogTitle></DialogHeader>
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="grid gap-3">
+              <img src={r.photo || "/avatar.png"} alt="Recruiter" className="h-32 w-32 object-cover rounded-full"/>
+              <div><Label>Name</Label><Input value={r.name} onChange={(e)=>setRecruiters(list=>list.map(x=>x.id===r.id?{...x,name:e.target.value}:x))}/></div>
+              <div><Label>Phone</Label><Input value={r.phone} onChange={(e)=>setRecruiters(list=>list.map(x=>x.id===r.id?{...x,phone:e.target.value}:x))}/></div>
+              <div><Label>Email</Label><Input value={r.email} onChange={(e)=>setRecruiters(list=>list.map(x=>x.id===r.id?{...x,email:e.target.value}:x))}/></div>
+              <div><Label>Crewcode</Label><Input value={r.crewCode} onChange={(e)=>setRecruiters(list=>list.map(x=>x.id===r.id?{...x,crewCode:e.target.value}:x))}/></div>
+              <div><Label>Role</Label><Input value={r.role} onChange={(e)=>setRecruiters(list=>list.map(x=>x.id===r.id?{...x,role:e.target.value}:x))}/></div>
+            </div>
+
+            <div className="grid gap-3">
+              <div className="p-3 border rounded-lg">
+                <div className="font-medium mb-1">This Month</div>
+                <div>Boxes sold: {totalBoxes}</div>
+                <div>Total score: {totalScore}</div>
+                <div>Revenue generated: €{toMoney(revenue)}</div>
+              </div>
+              <div className="p-3 border rounded-lg overflow-y-auto max-h-96">
+                <div className="font-medium mb-2">All Shifts</div>
+                <table className="min-w-full text-sm">
+                  <thead><tr>
+                    <th className="p-2 text-left">Date</th>
+                    <th className="p-2 text-left">Location</th>
+                    <th className="p-2 text-right">Score</th>
+                    <th className="p-2 text-right">Box2</th>
+                    <th className="p-2 text-right">Box4</th>
+                  </tr></thead>
+                  <tbody>
+                    {shifts.map((h,i)=>(
+                      <tr key={i} className="border-t">
+                        <td className="p-2">{fmtUK(h.dateISO)}</td>
+                        <td className="p-2">{h.location||"—"}</td>
+                        <td className="p-2 text-right">{h.score ?? "—"}</td>
+                        <td className="p-2 text-right">
+                          {(Number(h.box2_noDisc)||0)+(Number(h.box2_disc)||0)}
+                        </td>
+                        <td className="p-2 text-right">
+                          {(Number(h.box4_noDisc)||0)+(Number(h.box4_disc)||0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
   };
-  const removePhoto = (rec, setLocal) => {
-    setRecruiters(all => all.map(r => r.id===rec.id ? ({...r, photoUrl: undefined}) : r));
-    setLocal?.(s => ({...s, photoUrl: undefined}));
-  };
-
-  // quick sums for “this month” income & wages
-  const settings = load(K.settings, DEFAULT_SETTINGS);
-  const calcIncome = (row) => {
-    const type = row.shiftType==="EVENT" ? "EVENT":"D2D";
-    const m = (settings.conversionType||DEFAULT_SETTINGS.conversionType)[type];
-    const b2n = Number(row.box2_noDisc)||0, b2d = Number(row.box2_disc)||0;
-    const b4n = Number(row.box4_noDisc)||0, b4d = Number(row.box4_disc)||0;
-    return b2n*(m.noDiscount?.box2||0) + b2d*(m.discount?.box2||0)
-         + b4n*(m.noDiscount?.box4||0) + b4d*(m.discount?.box4||0);
-  };
-  const calcWages = (row) => {
-    const hrs = row.hours ?? roleHoursDefault(row.roleAtShift||"Rookie");
-    const rate = rateForDate(settings, row.dateISO);
-    return hrs*rate;
-  };
-  const thisMonthKey = currentMonthKey();
-
-  return (<div className="grid gap-4">
-    <div className="flex items-center justify-between">
-      <h3 className="font-semibold">Recruiters</h3>
-      <div className="flex items-center gap-2">
-        <Label>Filter</Label>
-        <select className="h-10 border rounded-md px-2" value={filter} onChange={(e)=>setFilter(e.target.value)}>
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-          <option value="all">All</option>
-        </select>
-      </div>
-    </div>
-
-    <div className="overflow-x-auto border rounded-xl">
-      <table className="min-w-full text-sm">
-        <thead className="bg-zinc-50">
-          <tr>
-            <th className="p-3">Name</th><th className="p-3">Role</th>
-            <th className="p-3">Last 5</th><th className="p-3 text-right">Average</th>
-            <th className="p-3 text-right">Box2</th><th className="p-3 text-right">Box4</th>
-            <th className="p-3 text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {decorated.map((r)=>(
-            <tr key={r.id} className="border-t">
-              <td className="p-3 font-medium">
-                <button className="underline" onClick={()=>setDetail(r)}>{r.name}</button>
-              </td>
-              <td className="p-3">{r.role}</td>
-              <td className="p-3">{r._last5.length? r._last5.join("–"):"—"}</td>
-              <td className="p-3 text-right" style={{color:avgColor(r._avg)}}>{r._avg.toFixed(2)}</td>
-              <td className="p-3 text-right" style={{color:box2Color(r._b2)}}>{r._b2.toFixed(1)}%</td>
-              <td className="p-3 text-right" style={{color:box4Color(r._b4)}}>{r._b4.toFixed(1)}%</td>
-              <td className="p-3 flex gap-2 justify-end">
-                <Button size="sm" variant="outline" onClick={()=>setEdit(r)}><Edit3 className="h-4 w-4"/>Edit</Button>
-                {!r.isInactive
-                  ? <Button size="sm" variant="destructive" onClick={()=>deactivate(r.id)}>Deactivate</Button>
-                  : <Button size="sm" onClick={()=>reactivate(r.id)}>Reactivate</Button>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-
-    {/* Recruiter Information (mega dialog) */}
-    <Dialog open={!!detail} onOpenChange={()=>setDetail(null)}>
-      <DialogContent className="max-w-7xl"> {/* bigger, tab-like */}
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-3">
-            {detail?.photoUrl ? <img src={detail.photoUrl} alt="" className="h-16 w-16 rounded-full object-cover"/> : <div className="h-16 w-16 rounded-full bg-zinc-200 grid place-items-center"><ImageIcon className="h-6 w-6"/></div>}
-            <span className="text-xl">Recruiter Information — {detail?.name}</span>
-          </DialogTitle>
-        </DialogHeader>
-
-        {/* photo controls + core info */}
-        <RecruiterInfoBody
-          recruiter={detail}
-          setRecruiters={setRecruiters}
-          history={history}
-          settings={settings}
-          thisMonthKey={thisMonthKey}
-          calcIncome={calcIncome}
-          calcWages={calcWages}
-          requestDeleteHistory={requestDeleteHistory}
-          updateHistField={updateHistField}
-          onPickPhoto={onPickPhoto}
-          removePhoto={removePhoto}
-        />
-
-        <DialogFooter><Button onClick={()=>setDetail(null)}>Close</Button></DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    <CredentialDialog
-      open={credOpen}
-      label="Confirm to delete history entry"
-      onCancel={() => { setCredOpen(false); setPendingDelete(null); }}
-      onSuccess={performDeleteHistory}
-    />
-
-    {/* Edit recruiter (no phone/crewcode here; basic rename/role) */}
-    <Dialog open={!!edit} onOpenChange={()=>setEdit(null)}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Edit recruiter</DialogTitle></DialogHeader>
-        <div className="grid gap-2">
-          <Label>Name</Label><Input value={edit?.name||""} onChange={(e)=>setEdit({...edit,name:e.target.value})}/>
-          <Label>Role</Label>
-          <select className="h-10 border rounded-md px-2" value={edit?.role||"Rookie"} onChange={(e)=>setEdit({...edit,role:e.target.value})}>
-            {ROLES.map(r=><option key={r}>{r}</option>)}
-          </select>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={()=>setEdit(null)}>Cancel</Button>
-          <Button style={{background:"#d9010b",color:"white"}} onClick={()=>{
-            setRecruiters(all=>all.map(r=>r.id===edit.id?{...edit, name:titleCase(edit.name)}:r));
-            setEdit(null);
-          }}>Save</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  </div>);
-};
-
-// Split out: big body for Recruiter Information (keeps dialog readable)
-const RecruiterInfoBody = ({
-  recruiter, setRecruiters, history, settings, thisMonthKey,
-  calcIncome, calcWages, requestDeleteHistory, updateHistField, onPickPhoto, removePhoto
-}) => {
-  const [local, setLocal] = useState(recruiter);
-
-  useEffect(()=>setLocal(recruiter),[recruiter]);
-
-  const monthRows = history.filter(h=>h.recruiterId===recruiter?.id && monthKey(h.dateISO)===thisMonthKey);
-  const wages = monthRows.reduce((s,r)=>s+calcWages(r),0);
-  const income = monthRows.reduce((s,r)=>s+calcIncome(r),0);
 
   return (
     <div className="grid gap-4">
-      {/* Top: photo + profile fields */}
-      <div className="border rounded-xl p-3">
-        <div className="flex flex-wrap gap-4 items-end">
-          <div className="flex items-center gap-3">
-            {local?.photoUrl ? <img src={local.photoUrl} alt="" className="h-24 w-24 rounded-full object-cover"/> : <div className="h-24 w-24 rounded-full bg-zinc-200 grid place-items-center"><ImageIcon className="h-6 w-6"/></div>}
-            <div className="flex flex-col gap-2">
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" onClick={()=>onPickPhoto(local,setLocal)}><ImageIcon className="h-4 w-4 mr-1"/>Add/Change Photo</Button>
-                {local?.photoUrl && <Button size="sm" variant="destructive" onClick={()=>removePhoto(local,setLocal)}>Remove Photo</Button>}
-              </div>
-              <div className="text-sm text-zinc-600">This month — Wages €{toMoney(wages)} • Income for Proago €{toMoney(income)}</div>
-            </div>
-          </div>
-          <div className="grid md:grid-cols-3 gap-3 flex-1">
-            <div><Label>Role</Label>
-              <select className="h-10 w-full border rounded-md px-2" value={local?.role||"Rookie"} onChange={(e)=>setRecruiters(all=>all.map(r=>r.id===local.id?{...r,role:e.target.value}:r))}>
-                {ROLES.map(r=><option key={r}>{r}</option>)}
-              </select>
-            </div>
-            <div><Label>Crewcode</Label>
-              <Input value={local?.crewCode||""} onChange={(e)=>setRecruiters(all=>all.map(r=>r.id===local.id?{...r,crewCode:e.target.value}:r))}/>
-            </div>
-            <div><Label>Status</Label>
-              <Input readOnly value={local?.isInactive ? "Inactive" : "Active"} />
-            </div>
-            <div><Label>Phone</Label>
-              <Input value={local?.phone||""} onChange={(e)=>{
-                const norm=formatPhoneByCountry(e.target.value);
-                if(!norm.ok && e.target.value) return; // accept empty; enforce valid otherwise
-                setRecruiters(all=>all.map(r=>r.id===local.id?{...r,phone:norm.display||""}:r));
-                setLocal(s=>({...s,phone:norm.display||e.target.value}));
-              }}/>
-            </div>
-            <div><Label>Email</Label>
-              <Input value={local?.email||""} onChange={(e)=>{ setRecruiters(all=>all.map(r=>r.id===local.id?{...r,email:e.target.value}:r)); setLocal(s=>({...s,email:e.target.value})); }}/>
-            </div>
-          </div>
+      <div className="flex justify-between items-center">
+        <h3 className="font-semibold">Recruiters</h3>
+        <div className="flex gap-2 items-center">
+          <Label>Status</Label>
+          <select className="h-10 border rounded-md px-2" value={status} onChange={(e)=>setStatus(e.target.value)}>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="all">All</option>
+          </select>
         </div>
       </div>
 
-      {/* History table — wider inputs so numbers are visible */}
-      <div className="max-h-[60vh] overflow-auto border rounded-lg">
+      <div className="overflow-x-auto border rounded-xl">
         <table className="min-w-full text-sm">
           <thead className="bg-zinc-50">
             <tr>
-              <th className="p-2 text-left">Date</th>
-              <th className="p-2 text-left">Role</th>
-              <th className="p-2 text-left">Location</th>
-              <th className="p-2 text-right">Hours</th>
-              <th className="p-2 text-right">Mult</th>
-              <th className="p-2 text-right">Score</th>
-              <th className="p-2 text-right">B2 No</th>
-              <th className="p-2 text-right">B2 Disc</th>
-              <th className="p-2 text-right">B4 No</th>
-              <th className="p-2 text-right">B4 Disc</th>
-              <th className="p-2 text-right">Delete</th>
+              <th className="p-3 text-left">Name</th>
+              <th className="p-3 text-left">Role</th>
+              <th className="p-3 text-left">Crewcode</th>
+              <th className="p-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {history
-              .filter(h=>h.recruiterId===recruiter?.id)
-              .sort((a,b)=>a.dateISO<b.dateISO?1:-1)
-              .map((h,i)=>(
-              <tr key={`${h.dateISO}_${h._rowKey||0}_${i}`} className="border-t">
-                <td className="p-2">{fmtUK(h.dateISO)}</td>
-                <td className="p-2">
-                  <select defaultValue={h.roleAtShift||recruiter?.role||"Rookie"} className="h-9 border rounded-md px-2" onChange={(e)=>updateHistField(recruiter.id,h.dateISO,h._rowKey,"roleAtShift",e.target.value)}>
-                    {ROLES.map(r=><option key={r} value={r}>{r}</option>)}
-                  </select>
-                </td>
-                <td className="p-2">
-                  <Input value={h.location||""} readOnly title="Edit location via Planning" />
-                </td>
-                <td className="p-2 text-right"><Input className="w-24" defaultValue={h.hours??""} inputMode="numeric" onBlur={(e)=>updateHistField(recruiter.id,h.dateISO,h._rowKey,"hours",e.target.value)}/></td>
-                <td className="p-2 text-right"><Input className="w-24" defaultValue={h.commissionMult??""} inputMode="decimal" onBlur={(e)=>updateHistField(recruiter.id,h.dateISO,h._rowKey,"commissionMult",e.target.value)}/></td>
-                <td className="p-2 text-right"><Input className="w-24" defaultValue={h.score??""} inputMode="numeric" onBlur={(e)=>updateHistField(recruiter.id,h.dateISO,h._rowKey,"score",e.target.value)}/></td>
-                <td className="p-2 text-right"><Input className="w-24" defaultValue={h.box2_noDisc??(h.box2??"")} inputMode="numeric" onBlur={(e)=>updateHistField(recruiter.id,h.dateISO,h._rowKey,"box2_noDisc",e.target.value)}/></td>
-                <td className="p-2 text-right"><Input className="w-24" defaultValue={h.box2_disc??""} inputMode="numeric" onBlur={(e)=>updateHistField(recruiter.id,h.dateISO,h._rowKey,"box2_disc",e.target.value)}/></td>
-                <td className="p-2 text-right"><Input className="w-24" defaultValue={h.box4_noDisc??(h.box4??"")} inputMode="numeric" onBlur={(e)=>updateHistField(recruiter.id,h.dateISO,h._rowKey,"box4_noDisc",e.target.value)}/></td>
-                <td className="p-2 text-right"><Input className="w-24" defaultValue={h.box4_disc??""} inputMode="numeric" onBlur={(e)=>updateHistField(recruiter.id,h.dateISO,h._rowKey,"box4_disc",e.target.value)}/></td>
-                <td className="p-2 text-right">
-                  <Button variant="destructive" size="sm" onClick={()=>requestDeleteHistory(recruiter.id, h.dateISO, h._rowKey)} title="Delete this history row">
-                    <Trash2 className="h-4 w-4" />
+            {visible.map(r=>(
+              <tr key={r.id} className="border-t">
+                <td className="p-3 font-medium">{r.name}</td>
+                <td className="p-3">{r.role}</td>
+                <td className="p-3">{r.crewCode}</td>
+                <td className="p-3 flex gap-2 justify-end">
+                  <Button size="sm" variant="outline" onClick={()=>setInfoId(r.id)}>Info</Button>
+                  <Button size="sm" variant="outline" onClick={()=>toggleInactive(r)}>
+                    {r.isInactive ? "Activate" : "Deactivate"}
                   </Button>
+                  <Button size="sm" variant="destructive" onClick={()=>delRecruiter(r)}>Delete</Button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {infoId && <RecruiterInfo r={rById(infoId)}/>}
     </div>
   );
 };
 /* ──────────────────────────────────────────────────────────────────────────
-  Planning — Teams + Zones; starts empty; full-screen editor; clearer DayCard
+  Planning — Teams are Zones; full-screen editor; centered day cards; no dup recruiters/day
 ────────────────────────────────────────────────────────────────────────── */
+
 const ensureWeek = (state, weekISO) => {
   const safe = state && typeof state === "object" ? state : {};
   const base = safe[weekISO] && typeof safe[weekISO] === "object" ? safe[weekISO] : { days: {} };
   if (!base.days || typeof base.days !== "object") base.days = {};
-
   for (let i = 0; i < 7; i++) {
     const dateISO = fmtISO(addDays(parseISO(weekISO), i));
-    if (!base.days[dateISO]) base.days[dateISO] = { teams: [] }; // start with no teams
+    if (!base.days[dateISO]) {
+      // start empty; our team object is a zone container: { zone, project, shiftType, rows: [...] }
+      base.days[dateISO] = { teams: [] };
+    }
   }
   return { ...safe, [weekISO]: base };
 };
@@ -821,7 +638,13 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
     const wk = planning?.[weekStart];
     const days = wk?.days && typeof wk.days === "object" ? wk.days : {};
     const day = days[iso] && typeof days[iso] === "object" ? days[iso] : { teams: [] };
-    day.teams = (day.teams || []).map(t => ({ project: "HF", shiftType: "D2D", zones: ["Luxembourg, Gare"], rows: [], ...t }));
+    // normalize legacy structure to zone-based team
+    day.teams = (day.teams || []).map(t => ({
+      zone: t.zone ?? (Array.isArray(t.zones) ? (t.zones[0] || "") : (t.name || "")),
+      project: t.project || "HF",
+      shiftType: t.shiftType || "D2D",
+      rows: (t.rows || []).map((row, idx) => ({ _rowKey: row?._rowKey ?? idx, ...row })),
+    }));
     return day;
   };
 
@@ -832,37 +655,34 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
   ];
   const shiftTypes = [{ label: "Door-to-Door", val: "D2D" }, { label: "Events", val: "EVENT" }];
 
-  // Edit Day modal state (full width) — no helper sentences
+  // Edit Day modal (full-screen)
   const [editDateISO, setEditDateISO] = useState(null);
   const [draftDay, setDraftDay] = useState(null);
 
   const openEditDay = (dateISO) => {
     const d = clone(getDay(dateISO));
-    // do NOT auto-create a team here; user will add
-    d.teams = Array.isArray(d.teams) ? d.teams.map(team => ({...team, rows:(team.rows||[]).map((row,idx)=>({_rowKey: row?._rowKey ?? idx, ...row}))})) : [];
+    d.teams = Array.isArray(d.teams) ? d.teams.map(team => ({ ...team, rows: (team.rows || []).map((row, idx) => ({ _rowKey: row?._rowKey ?? idx, ...row })) })) : [];
     setEditDateISO(dateISO);
     setDraftDay(d);
   };
   const closeEditDay = () => { setEditDateISO(null); setDraftDay(null); };
 
+  // Helpers: used recruiters (to avoid duplicates within the same day)
+  const usedRecruiterIds = (d) => {
+    const set = new Set();
+    (d?.teams || []).forEach(t => (t.rows || []).forEach(r => r.recruiterId && set.add(r.recruiterId)));
+    return set;
+  };
+
+  // Team (Zone) mutations
   const addTeam = () =>
-    setDraftDay(d => ({ ...d, teams: [...(d?.teams || []), { name: "", project: "HF", shiftType: "D2D", zones: [""], rows: [] }] }));
+    setDraftDay(d => ({ ...d, teams: [...(d?.teams || []), { zone: "", project: "HF", shiftType: "D2D", rows: [] }] }));
   const delTeam = (ti) =>
     setDraftDay(d => ({ ...d, teams: (d?.teams || []).filter((_, i) => i !== ti) }));
   const setTeamField = (ti, patch) =>
     setDraftDay(d => { const teams = clone(d.teams || []); teams[ti] = { ...teams[ti], ...patch }; return { ...d, teams }; });
 
-  const addZoneToTeam = (ti) =>
-    setDraftDay(d => { const teams = clone(d.teams || []); (teams[ti].zones ||= []).push(`Zone ${teams[ti].zones.length + 1}`); return { ...d, teams }; });
-  const delZoneFromTeam = (ti, zi) =>
-    setDraftDay(d => {
-      const teams = clone(d.teams || []);
-      const removed = (teams[ti].zones || [])[zi];
-      teams[ti].zones = (teams[ti].zones || []).filter((_, i) => i !== zi);
-      teams[ti].rows = (teams[ti].rows || []).map(r => (r.zone === removed ? { ...r, zone: "" } : r));
-      return { ...d, teams };
-    });
-
+  // Rows (no zone column; zone is the team’s zone)
   const addRow = (ti) =>
     setDraftDay(d => {
       const teams = clone(d.teams || []);
@@ -870,7 +690,6 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
       (teams[ti].rows ||= []).push({
         _rowKey: nextKey,
         recruiterId: "",
-        zone: teams[ti].zones?.[0] || "",
         hours: "",
         commissionMult: "",
         score: "",
@@ -881,15 +700,34 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
       });
       return { ...d, teams };
     });
+
   const delRow = (ti, ri) =>
     setDraftDay(d => { const teams = clone(d.teams || []); teams[ti].rows = (teams[ti].rows || []).filter((_, i) => i !== ri); return { ...d, teams }; });
-  const setRow = (ti, ri, patch) =>
-    setDraftDay(d => { const teams = clone(d.teams || []); teams[ti].rows[ri] = { ...teams[ti].rows[ri], ...patch }; return { ...d, teams }; });
 
+  const setRow = (ti, ri, patch) =>
+    setDraftDay(d => {
+      const teams = clone(d.teams || []);
+      const next = { ...teams[ti].rows[ri], ...patch };
+      // Prevent duplicate recruiter across the entire day
+      if (patch.recruiterId) {
+        const used = usedRecruiterIds({ teams });
+        // allow keeping the same recruiter on this row, but if selecting a new one that's already used, revert
+        const alreadyUsed = used.has(patch.recruiterId) && teams[ti].rows[ri].recruiterId !== patch.recruiterId;
+        if (alreadyUsed) {
+          alert("This recruiter is already assigned today.");
+          return { ...d }; // no change
+        }
+      }
+      teams[ti].rows[ri] = next;
+      return { ...d, teams };
+    });
+
+  // Save Day → planning + history upserts
   const saveDay = () => {
     if (!draftDay) return;
     const dateISO = editDateISO;
 
+    // Validate discount-split vs score
     for (const team of draftDay.teams || []) {
       for (const row of team.rows || []) {
         const sc = Number(row.score || 0);
@@ -898,7 +736,10 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
         const b4n = Number(row.box4_noDisc || 0);
         const b4d = Number(row.box4_disc || 0);
         const sum = b2n + b2d + b4n + b4d;
-        if (sum > sc) { alert("Box2/Box4 totals (no-disc + disc) cannot exceed Score."); return; }
+        if (sum > sc) {
+          alert("Box2/Box4 totals (no-disc + disc) cannot exceed Score.");
+          return;
+        }
       }
     }
 
@@ -912,10 +753,10 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
     setHistory((h) => {
       let out = [...h];
       (draftDay.teams || []).forEach((team) => {
+        const zoneName = team.zone || "";
         (team.rows || []).forEach((row, idx) => {
           if (!row.recruiterId) return;
           const rec = rById(row.recruiterId);
-          const zoneName = row.zone || team.name || "";
           out = upsertHistory(out, {
             _rowKey: row._rowKey ?? idx,
             dateISO,
@@ -944,7 +785,7 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
 
   const scoreColor = (v) => (v >= 3 ? "#10b981" : v >= 2 ? "#fbbf24" : "#ef4444");
 
-  // Day card preview — Full weekday name; date below; score at right; hide zone under recruiter
+  // Day card preview — centered weekday & date; show only score number
   const DayCard = ({ i }) => {
     const dISO = fmtISO(addDays(parseISO(weekStart), i));
     const day = getDay(dISO);
@@ -953,28 +794,28 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
     return (
       <Card className="flex-1">
         <CardHeader className="pb-2">
-          <CardTitle className="flex flex-col">
-            <span>{weekday}</span>
-            <span className="text-sm text-zinc-500">{fmtUK(dISO)}</span>
+          <CardTitle className="flex flex-col items-center text-center">
+            <span className="leading-tight">{weekday}</span>
+            <span className="text-sm text-zinc-500 leading-tight">{fmtUK(dISO)}</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 pt-0">
-          {day.teams && day.teams.length > 0 ? (
+          {(day.teams || []).length > 0 ? (
             day.teams.map((t, ti) => (
               <div key={ti} className="border rounded-lg p-2">
-                <div className="font-medium">{t.name || "—"} <span className="text-xs text-zinc-600">• {t.project || "HF"}</span></div>
+                <div className="font-medium">{t.zone || "—"} <span className="text-xs text-zinc-600">• {t.project || "HF"}</span></div>
                 {(t.rows || []).length > 0 ? (
                   <ul className="text-sm space-y-1 mt-1">
                     {t.rows.map((row, ri) => {
                       const rec = rById(row.recruiterId);
+                      // Prefer draft row score if we're rendering live; otherwise check history row
                       const histRow = history.find(h => h.recruiterId===row.recruiterId && h.dateISO===dISO && (h._rowKey||0)===(row._rowKey||ri));
-                      const sc = row.score ?? histRow?.score;
-                      const showScore = typeof sc === "number" ? Number(sc) : undefined;
+                      const sc = (row.score !== "" && row.score != null) ? Number(row.score) : (typeof histRow?.score === "number" ? Number(histRow.score) : undefined);
                       return (
                         <li key={ri} className="flex items-center justify-between">
-                          <span>{rec?.name || "Recruiter"}</span>
-                          <span className="text-base" style={{color: showScore!=null ? scoreColor(showScore) : "#ef4444"}}>
-                            {showScore!=null ? showScore : "—"}
+                          <span>{rec?.name || ""}</span>
+                          <span className="text-base font-medium" style={{ color: sc != null ? scoreColor(sc) : undefined }}>
+                            {sc != null ? sc : ""}
                           </span>
                         </li>
                       );
@@ -1016,124 +857,129 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
         {Array.from({ length: 7 }).map((_, i) => <DayCard key={i} i={i} />)}
       </div>
 
-      {/* Edit Day modal — full width, no helper sentences, widened inputs */}
+      {/* Full-screen Edit Day with wide inputs and scroll */}
       <Dialog open={!!editDateISO} onOpenChange={(open) => { if (!open) closeEditDay(); }}>
-        <DialogContent className="max-w-7xl">
+        <DialogContent className="max-w-[92vw] w-[92vw] h-[86vh] p-4">
           <DialogHeader>
             <DialogTitle>Edit Day — {fmtUK(editDateISO || "")}</DialogTitle>
           </DialogHeader>
 
-          <div className="grid gap-3">
-            {(draftDay?.teams || []).map((t, ti) => (
-              <div key={ti} className="border rounded-xl p-3">
-                {/* Team header */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
-                  <div className="grid gap-1">
-                    <Label>Team</Label>
-                    <Input className="h-9" value={t.name} onChange={(e) => setTeamField(ti, { name: e.target.value })} />
+          <div className="grid gap-3 h-[calc(86vh-5rem)] overflow-y-auto pr-1">
+            {(draftDay?.teams || []).map((t, ti) => {
+              const used = usedRecruiterIds(draftDay);
+              return (
+                <div key={ti} className="border rounded-xl p-3">
+                  {/* Team header = Zone + project/type, no team name */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                    <div className="grid gap-1">
+                      <Label>Zone</Label>
+                      <Input className="h-9" value={t.zone} onChange={(e) => setTeamField(ti, { zone: e.target.value })} />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label>Project</Label>
+                      <select className="h-9 border rounded-md px-2" value={t.project || "HF"} onChange={(e)=>setTeamField(ti,{project:e.target.value})}>
+                        {(load(K.settings, DEFAULT_SETTINGS).projects || ["HF"]).map(p => <option key={p}>{p}</option>)}
+                      </select>
+                    </div>
+                    <div className="grid gap-1">
+                      <Label>Shift Type</Label>
+                      <select className="h-9 border rounded-md px-2" value={t.shiftType || "D2D"} onChange={(e)=>setTeamField(ti,{shiftType:e.target.value})}>
+                        {shiftTypes.map(s => <option key={s.val} value={s.val}>{s.label}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex items-end justify-end">
+                      <Button variant="destructive" size="sm" onClick={()=>delTeam(ti)}><X className="h-4 w-4 mr-1"/> Remove</Button>
+                    </div>
                   </div>
-                  <div className="grid gap-1">
-                    <Label>Project</Label>
-                    <select className="h-9 border rounded-md px-2" value={t.project || "HF"} onChange={(e)=>setTeamField(ti,{project:e.target.value})}>
-                      {(load(K.settings, DEFAULT_SETTINGS).projects || ["HF"]).map(p => <option key={p}>{p}</option>)}
-                    </select>
-                  </div>
-                  <div className="grid gap-1">
-                    <Label>Shift Type</Label>
-                    <select className="h-9 border rounded-md px-2" value={t.shiftType || "D2D"} onChange={(e)=>setTeamField(ti,{shiftType:e.target.value})}>
-                      {shiftTypes.map(s => <option key={s.val} value={s.val}>{s.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex items-end justify-end">
-                    <Button variant="destructive" size="sm" onClick={()=>delTeam(ti)}><X className="h-4 w-4 mr-1"/> Remove Team</Button>
-                  </div>
-                </div>
 
-                {/* Zones manager */}
-                <div className="border rounded-lg p-2 mb-3">
-                  <div className="text-xs uppercase text-zinc-500 mb-1">Zones</div>
-                  <div className="flex flex-wrap gap-2 items-center">
-                    {(t.zones || []).map((z, zi) => (
-                      <div key={zi} className="flex items-center gap-2 border rounded-full px-3 py-1">
-                        <Input className="h-8 w-44" value={z} onChange={(e)=>{
-                          const val = e.target.value;
-                          setDraftDay(d=>{
-                            const teams = clone(d.teams||[]);
-                            teams[ti].zones[zi] = val;
-                            return {...d, teams};
-                          });
-                        }}/>
-                        <Button variant="ghost" size="sm" onClick={()=>delZoneFromTeam(ti, zi)}><X className="h-4 w-4"/></Button>
-                      </div>
-                    ))}
-                    <Button variant="outline" size="sm" onClick={()=>addZoneToTeam(ti)}><Plus className="h-4 w-4 mr-1"/> Add Zone</Button>
-                  </div>
-                </div>
-
-                {/* Rows table — widened inputs so numbers are visible */}
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-zinc-50">
-                      <tr>
-                        <th className="p-2 text-left">Recruiter</th>
-                        <th className="p-2 text-left">Zone</th>
-                        <th className="p-2 text-right">Hours</th>
-                        <th className="p-2 text-right">Mult</th>
-                        <th className="p-2 text-right">Score</th>
-                        <th className="p-2 text-right">B2 No</th>
-                        <th className="p-2 text-right">B2 Disc</th>
-                        <th className="p-2 text-right">B4 No</th>
-                        <th className="p-2 text-right">B4 Disc</th>
-                        <th className="p-2 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(t.rows || []).map((row, ri) => (
-                        <tr key={ri} className="border-t">
-                          <td className="p-2">
-                            <select className="h-9 border rounded-md px-2 min-w-48" value={row.recruiterId} onChange={(e) => setRow(ti, ri, { recruiterId: e.target.value })}>
-                              <option value="">Select…</option>
-                              {recruiters.map((r) => (<option key={r.id} value={r.id}>{r.name}</option>))}
-                            </select>
-                          </td>
-                          <td className="p-2">
-                            <select className="h-9 border rounded-md px-2 min-w-36" value={row.zone || ""} onChange={(e)=>setRow(ti,ri,{zone:e.target.value})}>
-                              <option value="">—</option>
-                              {(t.zones||[]).map((z,i2)=>(<option key={i2} value={z}>{z}</option>))}
-                            </select>
-                          </td>
-                          <td className="p-2 text-right">
-                            <Input className="w-24 h-9 text-right" inputMode="numeric" value={row.hours ?? ""} onChange={(e) => setRow(ti, ri, { hours: e.target.value })} />
-                          </td>
-                          <td className="p-2 text-right">
-                            <select className="h-9 border rounded-md px-2" value={row.commissionMult ?? ""} onChange={(e) => setRow(ti, ri, { commissionMult: e.target.value ? Number(e.target.value) : "" })}>
-                              <option value="">—</option>
-                              {multipliers.map((m) => (<option key={m.val} value={m.val}>{m.label}</option>))}
-                            </select>
-                          </td>
-                          <td className="p-2 text-right"><Input className="w-24 h-9 text-right" inputMode="numeric" value={row.score ?? ""} onChange={(e) => setRow(ti, ri, { score: e.target.value })} /></td>
-                          <td className="p-2 text-right"><Input className="w-24 h-9 text-right" inputMode="numeric" value={row.box2_noDisc ?? ""} onChange={(e) => setRow(ti, ri, { box2_noDisc: e.target.value })} /></td>
-                          <td className="p-2 text-right"><Input className="w-24 h-9 text-right" inputMode="numeric" value={row.box2_disc ?? ""} onChange={(e) => setRow(ti, ri, { box2_disc: e.target.value })} /></td>
-                          <td className="p-2 text-right"><Input className="w-24 h-9 text-right" inputMode="numeric" value={row.box4_noDisc ?? ""} onChange={(e) => setRow(ti, ri, { box4_noDisc: e.target.value })} /></td>
-                          <td className="p-2 text-right"><Input className="w-24 h-9 text-right" inputMode="numeric" value={row.box4_disc ?? ""} onChange={(e) => setRow(ti, ri, { box4_disc: e.target.value })} /></td>
-                          <td className="p-2 text-right">
-                            <Button variant="outline" size="sm" onClick={() => delRow(ti, ri)}><X className="h-4 w-4" /></Button>
-                          </td>
+                  {/* Rows — no zone column; wider inputs */}
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-zinc-50">
+                        <tr>
+                          <th className="p-2 text-left">Recruiter</th>
+                          <th className="p-2 text-right">Hours</th>
+                          <th className="p-2 text-right">Mult</th>
+                          <th className="p-2 text-right">Score</th>
+                          <th className="p-2 text-right">B2 No</th>
+                          <th className="p-2 text-right">B2 Disc</th>
+                          <th className="p-2 text-right">B4 No</th>
+                          <th className="p-2 text-right">B4 Disc</th>
+                          <th className="p-2 text-right">Actions</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                      </thead>
+                      <tbody>
+                        {(t.rows || []).map((row, ri) => (
+                          <tr key={ri} className="border-t">
+                            <td className="p-2">
+                              <select
+                                className="h-9 border rounded-md px-2 min-w-52"
+                                value={row.recruiterId}
+                                onChange={(e) => setRow(ti, ri, { recruiterId: e.target.value })}
+                              >
+                                <option value="">Select…</option>
+                                {recruiters.map((r) => {
+                                  const disabled = used.has(r.id) && r.id !== row.recruiterId;
+                                  return (
+                                    <option key={r.id} value={r.id} disabled={disabled}>
+                                      {r.name}{disabled ? " (already assigned)" : ""}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </td>
+                            <td className="p-2 text-right">
+                              <Input className="w-28 h-9 text-right" inputMode="numeric"
+                                value={row.hours ?? ""} onChange={(e) => setRow(ti, ri, { hours: e.target.value })} />
+                            </td>
+                            <td className="p-2 text-right">
+                              <select className="h-9 border rounded-md px-2"
+                                value={row.commissionMult ?? ""}
+                                onChange={(e) => setRow(ti, ri, { commissionMult: e.target.value ? Number(e.target.value) : "" })}
+                              >
+                                <option value="">—</option>
+                                {multipliers.map((m) => (<option key={m.val} value={m.val}>{m.label}</option>))}
+                              </select>
+                            </td>
+                            <td className="p-2 text-right">
+                              <Input className="w-28 h-9 text-right" inputMode="numeric"
+                                value={row.score ?? ""} onChange={(e) => setRow(ti, ri, { score: e.target.value })} />
+                            </td>
+                            <td className="p-2 text-right">
+                              <Input className="w-28 h-9 text-right" inputMode="numeric"
+                                value={row.box2_noDisc ?? ""} onChange={(e) => setRow(ti, ri, { box2_noDisc: e.target.value })} />
+                            </td>
+                            <td className="p-2 text-right">
+                              <Input className="w-28 h-9 text-right" inputMode="numeric"
+                                value={row.box2_disc ?? ""} onChange={(e) => setRow(ti, ri, { box2_disc: e.target.value })} />
+                            </td>
+                            <td className="p-2 text-right">
+                              <Input className="w-28 h-9 text-right" inputMode="numeric"
+                                value={row.box4_noDisc ?? ""} onChange={(e) => setRow(ti, ri, { box4_noDisc: e.target.value })} />
+                            </td>
+                            <td className="p-2 text-right">
+                              <Input className="w-28 h-9 text-right" inputMode="numeric"
+                                value={row.box4_disc ?? ""} onChange={(e) => setRow(ti, ri, { box4_disc: e.target.value })} />
+                            </td>
+                            <td className="p-2 text-right">
+                              <Button variant="outline" size="sm" onClick={() => delRow(ti, ri)}><X className="h-4 w-4" /></Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
 
-                <div className="pt-2">
-                  <Button variant="outline" size="sm" onClick={() => addRow(ti)}><Plus className="h-4 w-4 mr-1" /> Add Recruiter</Button>
+                  <div className="pt-2">
+                    <Button variant="outline" size="sm" onClick={() => addRow(ti)}><Plus className="h-4 w-4 mr-1" /> Add Recruiter</Button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="flex items-center justify-between mt-3">
-            <Button variant="outline" size="sm" onClick={addTeam}><Plus className="h-4 w-4 mr-1" /> Add Team</Button>
+            <Button variant="outline" size="sm" onClick={addTeam}><Plus className="h-4 w-4 mr-1" /> Add Zone</Button>
             <div className="flex gap-2">
               <Button variant="outline" onClick={closeEditDay}>Cancel</Button>
               <Button style={{ background:"#d9010b", color:"white" }} onClick={saveDay}>Save</Button>
@@ -1145,7 +991,7 @@ const Planning = ({ recruiters, planning, setPlanning, history, setHistory }) =>
   );
 };
 /* ──────────────────────────────────────────────────────────────────────────
-  Salary — “Wages” naming; dropdown shows Location (no Base)
+  Wages — monthly wages + bonus; details show Location (no Base column)
 ────────────────────────────────────────────────────────────────────────── */
 
 const rookieCommission = (box2) => {
@@ -1154,18 +1000,18 @@ const rookieCommission = (box2) => {
   return 235 + (box2 - 10) * 15;
 };
 
-const Salary = ({ recruiters, history }) => {
+const Wages = ({ recruiters, history }) => {
   const [payMonth, setPayMonth] = useState(currentMonthKey());
   const [status, setStatus] = useState("all");
   const [open, setOpen] = useState({}); // recruiterId => bool
 
   const monthShift = (ym, delta) => {
     const [y,m] = ym.split("-").map(Number);
-    const d = new Date(Date.UTC(y,m-1,1));
-    d.setUTCMonth(d.getUTCMonth()+delta);
+    const d = new Date(Date.UTC(y,m-1,1)); d.setUTCMonth(d.getUTCMonth()+delta);
     return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}`;
   };
 
+  // Wages are for previous month relative to payday month; Bonus is the month before that
   const workMonth = prevMonthKey(payMonth);
   const commMonth = prevMonthKey(workMonth);
   const inMonth = (iso, ym) => monthKey(iso) === ym;
@@ -1177,6 +1023,7 @@ const Salary = ({ recruiters, history }) => {
     .map(r => {
       const hRows = history.filter(x => x.recruiterId===r.id && inMonth(x.dateISO, workMonth));
       const rolesWorked = Array.from(new Set(hRows.map(x => x.roleAtShift || r.role || "Rookie")));
+      // hours + wages per row using rate bands (fallback to role default hours)
       const hourRows = hRows.map(row => {
         const hrs = (row.hours != null ? Number(row.hours) : roleHoursDefault(row.roleAtShift||r.role||"Rookie"));
         const rate = rateForDate(settings, row.dateISO);
@@ -1186,13 +1033,13 @@ const Salary = ({ recruiters, history }) => {
       const hours = hourRows.reduce((s,rr)=>s+rr.hrs,0);
       const wages = hourRows.reduce((s,rr)=>s+rr.wages,0);
 
+      // Bonus (commission) comes from month before workMonth
       const cRowsRaw = history.filter(x => x.recruiterId===r.id && inMonth(x.dateISO, commMonth));
       const cRows = cRowsRaw.map(row => {
         const b2 = (Number(row.box2_noDisc)||0)+(Number(row.box2_disc)||0);
         const mult = row.commissionMult ?? roleMultiplierDefault(row.roleAtShift||r.role||"Rookie");
-        const base = rookieCommission(b2);
-        const bonus = base*mult;
-        return { ...row, b2, base, mult, bonus };
+        const bonus = rookieCommission(b2) * mult;
+        return { ...row, b2, mult, bonus };
       });
       const bonus = cRows.reduce((s,rr)=>s+rr.bonus,0);
 
@@ -1207,7 +1054,7 @@ const Salary = ({ recruiters, history }) => {
     });
     const blob=new Blob([lines.join("\n")],{type:"text/csv"});
     const url=URL.createObjectURL(blob); const a=document.createElement("a");
-    a.href=url; a.download=`salary_${payMonth}.csv`; a.click(); URL.revokeObjectURL(url);
+    a.href=url; a.download=`wages_${payMonth}.csv`; a.click(); URL.revokeObjectURL(url);
   };
 
   return (
@@ -1291,7 +1138,7 @@ const Salary = ({ recruiters, history }) => {
                               </table>
                             </div>
                           </div>
-                          {/* Bonus breakdown — shows Location, no Base */}
+                          {/* Bonus breakdown — show Location instead of Base */}
                           <div className="border rounded-lg overflow-hidden">
                             <div className="px-3 py-2 bg-zinc-50 font-medium">Bonus — {monthLabel(commMonth)}</div>
                             <div className="overflow-x-auto">
@@ -1330,25 +1177,20 @@ const Salary = ({ recruiters, history }) => {
     </div>
   );
 };
-
 /* ──────────────────────────────────────────────────────────────────────────
-  Finances — totals by day/week; history persists regardless of recruiter status
+  Finances — Yearly drill-down: Year → Month → ISO Week# → Day → Shifts
+  Keep columns: Wages (left of Income) and Profit (right of Income)
+  De-duplicate rows by (recruiterId,dateISO,_rowKey) to avoid accidental dupes
 ────────────────────────────────────────────────────────────────────────── */
+
 const Finances = ({ history }) => {
-  const [month, setMonth] = useState(currentMonthKey());
-  const [openWeek, setOpenWeek] = useState({});
-  const [openDay, setOpenDay] = useState({});
+  const [year, setYear] = useState(new Date().getUTCFullYear());
+  const [openMonth, setOpenMonth] = useState({}); // "YYYY-MM" => bool
+  const [openWeek, setOpenWeek] = useState({});   // weekStartISO => bool
+  const [openDay, setOpenDay] = useState({});     // dateISO => bool
 
   const settings = load(K.settings, DEFAULT_SETTINGS);
   const matrix = settings.conversionType || DEFAULT_SETTINGS.conversionType;
-
-  const monthShift = (ym, delta) => {
-    const [y,m] = ym.split("-").map(Number);
-    const d = new Date(Date.UTC(y,m-1,1));
-    d.setUTCMonth(d.getUTCMonth()+delta);
-    return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}`;
-  };
-  const inMonth = (iso) => monthKey(iso) === month;
 
   const calcIncome = (row) => {
     const type = row.shiftType==="EVENT" ? "EVENT":"D2D";
@@ -1358,118 +1200,260 @@ const Finances = ({ history }) => {
     return b2n*(m.noDiscount?.box2||0) + b2d*(m.discount?.box2||0)
          + b4n*(m.noDiscount?.box4||0) + b4d*(m.discount?.box4||0);
   };
+  const calcWages = (row) => {
+    const hrs = row.hours ?? roleHoursDefault(row.roleAtShift||"Rookie");
+    const rate = rateForDate(settings, row.dateISO);
+    return hrs*rate;
+  };
 
-  // group by week -> day
-  const rows = history.filter(h => inMonth(h.dateISO));
-  const byWeek = {};
-  rows.forEach(r => {
-    const d = parseISO(r.dateISO);
-    const wkStart = fmtISO(startOfWeekMon(d));
-    const dayKey = r.dateISO;
-    byWeek[wkStart] ||= {};
-    byWeek[wkStart][dayKey] ||= [];
-    byWeek[wkStart][dayKey].push(r);
+  // filter to selected year and de-duplicate
+  const rowsYear = (() => {
+    const start = `${year}-01-01`, end = `${year}-12-31`;
+    const rows = history.filter(h => h.dateISO >= start && h.dateISO <= end);
+    const map = new Map();
+    rows.forEach(r => {
+      const key = `${r.recruiterId}|${r.dateISO}|${r._rowKey ?? -1}`;
+      if (!map.has(key)) map.set(key, r);
+    });
+    return Array.from(map.values());
+  })();
+
+  // group by month -> week (Mon start) -> day
+  const byMonth = {};
+  rowsYear.forEach(r=>{
+    const ym = monthKey(r.dateISO);
+    byMonth[ym] ||= [];
+    byMonth[ym].push(r);
   });
 
-  const weekKeys = Object.keys(byWeek).sort();
+  const ymKeys = Object.keys(byMonth).sort(); // chronological
 
-  const weekTotal = (wk) => {
-    const days = byWeek[wk] || {};
-    return Object.keys(days).reduce((s,dk)=> s + days[dk].reduce((x,r)=>x + calcIncome(r),0), 0);
+  const summarize = (rows) => {
+    let income=0,wages=0,score=0,box2=0,box4=0,shifts=0, detail=[];
+    detail = rows.map(r=>{
+      const inc = calcIncome(r), wag = calcWages(r);
+      const { b2, b4 } = boxTotals(r);
+      return { ...r, score:Number(r.score)||0, income:inc, wages:wag, profit:inc-wag, b2, b4 };
+    });
+    detail.forEach(r=>{ income+=r.income; wages+=r.wages; score+=r.score; box2+=r.b2; box4+=r.b4; shifts++; });
+    return { income, wages, profit: income-wages, score, box2, box4, shifts, detail };
   };
-  const dayTotal = (wk, dk) => (byWeek[wk][dk]||[]).reduce((s,r)=>s+calcIncome(r),0);
+  const profitColor = (v) => (v>0 ? "#10b981" : v<0 ? "#ef4444" : undefined);
+
+  const yearTotals = summarize(rowsYear);
 
   return (
     <div className="grid gap-4">
+      {/* Year picker */}
       <div className="flex items-center justify-between">
-        <div className="flex gap-2 items-center">
-          <Button variant="outline" onClick={()=>setMonth(monthShift(month,-1))}><ChevronLeft className="h-4 w-4"/>Prev</Button>
-          <Badge style={{background:"#fca11c"}}>{monthLabel(month)}</Badge>
-          <Button variant="outline" onClick={()=>setMonth(monthShift(month,1))}>Next<ChevronRight className="h-4 w-4"/></Button>
+        <div className="flex items-center gap-2">
+          <Label>Year</Label>
+          <select className="h-10 border rounded-md px-2" value={year}
+            onChange={(e)=>setYear(Number(e.target.value))}>
+            {Array.from({length:5}).map((_,i)=>{
+              const y = new Date().getUTCFullYear() - 2 + i;
+              return <option key={y} value={y}>{y}</option>;
+            })}
+          </select>
+        </div>
+        <div className="text-sm text-muted-foreground">
+          Wages €{toMoney(yearTotals.wages)} • Income €{toMoney(yearTotals.income)} • <span style={{color:profitColor(yearTotals.profit)}}>Profit €{toMoney(yearTotals.profit)}</span>
         </div>
       </div>
 
-      {weekKeys.length===0 ? (
-        <div className="text-sm text-muted-foreground">No data this month</div>
+      {ymKeys.length===0 ? (
+        <div className="text-sm text-muted-foreground">No data for {year}</div>
       ) : (
-        weekKeys.map(wk => (
-          <div key={wk} className="border rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-2 bg-zinc-50">
-              <div className="font-medium">Week of {fmtUK(wk)}</div>
-              <div className="flex items-center gap-3">
-                <div className="text-sm">Total €{toMoney(weekTotal(wk))}</div>
-                <Button size="sm" variant="outline" onClick={()=>setOpenWeek(s=>({...s,[wk]:!s[wk]}))}>
-                  {openWeek[wk] ? "Hide" : "Expand"}
-                </Button>
+        ymKeys.map(ym => {
+          const monthRows = byMonth[ym];
+          // group month into weeks
+          const byWeek = {};
+          monthRows.forEach(r=>{
+            const wkStart = fmtISO(startOfWeekMon(parseISO(r.dateISO)));
+            (byWeek[wkStart] ||= []).push(r);
+          });
+          const wkKeys = Object.keys(byWeek).sort();
+
+          const monthSum = summarize(monthRows);
+          return (
+            <div key={ym} className="border rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2 bg-zinc-50">
+                <div className="font-medium">{monthLabel(ym)}</div>
+                <div className="flex items-center gap-4">
+                  <div className="text-sm">Shifts {monthSum.shifts}</div>
+                  <div className="text-sm">Wages €{toMoney(monthSum.wages)}</div>
+                  <div className="text-sm">Income €{toMoney(monthSum.income)}</div>
+                  <div className="text-sm" style={{color:profitColor(monthSum.profit)}}>Profit €{toMoney(monthSum.profit)}</div>
+                  <Button size="sm" variant="outline" onClick={()=>setOpenMonth(s=>({...s,[ym]:!s[ym]}))}>
+                    {openMonth[ym] ? "Hide" : "Expand"}
+                  </Button>
+                </div>
               </div>
-            </div>
-            {openWeek[wk] && (
-              <div className="p-3">
-                {Object.keys(byWeek[wk]).sort().map(dk => (
-                  <div key={dk} className="border rounded-lg mb-3">
-                    <div className="flex items-center justify-between px-3 py-2">
-                      <div className="font-medium">{fmtUK(dk)}</div>
-                      <div className="flex items-center gap-3">
-                        <div className="text-sm">€{toMoney(dayTotal(wk,dk))}</div>
-                        <Button size="sm" variant="outline" onClick={()=>setOpenDay(s=>({...s,[dk]:!s[dk]}))}>
-                          {openDay[dk] ? "Hide" : "Details"}
-                        </Button>
-                      </div>
-                    </div>
-                    {openDay[dk] && (
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full text-sm">
-                          <thead className="bg-zinc-50">
-                            <tr>
-                              <th className="p-2 text-left">Recruiter</th>
-                              <th className="p-2 text-left">Location</th>
-                              <th className="p-2 text-left">Type</th>
-                              <th className="p-2 text-right">Score</th>
-                              <th className="p-2 text-right">Box2 No</th>
-                              <th className="p-2 text-right">Box2 Disc</th>
-                              <th className="p-2 text-right">Box4 No</th>
-                              <th className="p-2 text-right">Box4 Disc</th>
-                              <th className="p-2 text-right">Income €</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {byWeek[wk][dk].map((r,i)=>(
-                              <tr key={i} className="border-t">
-                                <td className="p-2">{r.recruiterName || r.recruiterId}</td>
-                                <td className="p-2">{r.location || "—"}</td>
-                                <td className="p-2">{r.shiftType || "D2D"}</td>
-                                <td className="p-2 text-right">{r.score ?? "—"}</td>
-                                <td className="p-2 text-right">{r.box2_noDisc ?? "—"}</td>
-                                <td className="p-2 text-right">{r.box2_disc ?? "—"}</td>
-                                <td className="p-2 text-right">{r.box4_noDisc ?? "—"}</td>
-                                <td className="p-2 text-right">{r.box4_disc ?? "—"}</td>
-                                <td className="p-2 text-right">{toMoney(calcIncome(r))}</td>
+
+              {openMonth[ym] && (
+                <div className="p-3">
+                  {/* Weeks table */}
+                  <div className="overflow-x-auto border rounded-lg">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-zinc-50"><tr>
+                        <th className="p-2 text-left">Week</th>
+                        <th className="p-2 text-right">Shifts</th>
+                        <th className="p-2 text-right">Score</th>
+                        <th className="p-2 text-right">Box2</th>
+                        <th className="p-2 text-right">Box4</th>
+                        <th className="p-2 text-right">Wages</th>
+                        <th className="p-2 text-right">Income</th>
+                        <th className="p-2 text-right">Profit</th>
+                        <th className="p-2 text-right">Days</th>
+                      </tr></thead>
+                      <tbody>
+                        {wkKeys.map(wk=>{
+                          const wkRows = byWeek[wk];
+                          // group into days
+                          const byDay = {};
+                          wkRows.forEach(r=>{ (byDay[r.dateISO] ||= []).push(r); });
+                          const dayKeys = Object.keys(byDay).sort();
+                          const wkSum = summarize(wkRows);
+                          return (
+                            <React.Fragment key={wk}>
+                              <tr className="border-t">
+                                <td className="p-2">Week {weekNumberISO(parseISO(wk))}</td>
+                                <td className="p-2 text-right">{wkSum.shifts}</td>
+                                <td className="p-2 text-right">{wkSum.score}</td>
+                                <td className="p-2 text-right">{wkSum.box2}</td>
+                                <td className="p-2 text-right">{wkSum.box4}</td>
+                                <td className="p-2 text-right">{toMoney(wkSum.wages)}</td>
+                                <td className="p-2 text-right">{toMoney(wkSum.income)}</td>
+                                <td className="p-2 text-right" style={{color:profitColor(wkSum.profit)}}>{toMoney(wkSum.profit)}</td>
+                                <td className="p-2 text-right">
+                                  <Button size="sm" variant="outline" onClick={()=>setOpenWeek(s=>({...s,[wk]:!s[wk]}))}>
+                                    {openWeek[wk] ? "Hide" : "View"}
+                                  </Button>
+                                </td>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
+
+                              {openWeek[wk] && (
+                                <tr>
+                                  <td colSpan={9} className="p-0">
+                                    <div className="px-3 pb-3">
+                                      {/* Days table */}
+                                      <div className="overflow-x-auto border rounded-lg">
+                                        <table className="min-w-full text-sm">
+                                          <thead className="bg-zinc-50"><tr>
+                                            <th className="p-2">Date</th>
+                                            <th className="p-2 text-right">Shifts</th>
+                                            <th className="p-2 text-right">Score</th>
+                                            <th className="p-2 text-right">Box2</th>
+                                            <th className="p-2 text-right">Box4</th>
+                                            <th className="p-2 text-right">Wages</th>
+                                            <th className="p-2 text-right">Income</th>
+                                            <th className="p-2 text-right">Profit</th>
+                                            <th className="p-2 text-right">Shifts</th>
+                                          </tr></thead>
+                                          <tbody>
+                                            {dayKeys.map(dk=>{
+                                              const dSum = summarize(byDay[dk]);
+                                              return (
+                                                <React.Fragment key={dk}>
+                                                  <tr className="border-t">
+                                                    <td className="p-2">{fmtUK(dk)}</td>
+                                                    <td className="p-2 text-right">{dSum.shifts}</td>
+                                                    <td className="p-2 text-right">{dSum.score}</td>
+                                                    <td className="p-2 text-right">{dSum.box2}</td>
+                                                    <td className="p-2 text-right">{dSum.box4}</td>
+                                                    <td className="p-2 text-right">{toMoney(dSum.wages)}</td>
+                                                    <td className="p-2 text-right">{toMoney(dSum.income)}</td>
+                                                    <td className="p-2 text-right" style={{color:profitColor(dSum.profit)}}>{toMoney(dSum.profit)}</td>
+                                                    <td className="p-2 text-right">
+                                                      <Button size="sm" variant="outline" onClick={()=>setOpenDay(s=>({...s,[dk]:!s[dk]}))}>
+                                                        {openDay[dk] ? "Hide" : "Details"}
+                                                      </Button>
+                                                    </td>
+                                                  </tr>
+
+                                                  {openDay[dk] && (
+                                                    <tr>
+                                                      <td colSpan={9} className="p-0">
+                                                        <div className="px-2 pb-3">
+                                                          <div className="overflow-x-auto border rounded-lg">
+                                                            <table className="min-w-full text-sm">
+                                                              <thead className="bg-zinc-50"><tr>
+                                                                <th className="p-2 text-left">Recruiter</th>
+                                                                <th className="p-2 text-left">Project</th>
+                                                                <th className="p-2 text-left">Type</th>
+                                                                <th className="p-2 text-left">Location</th>
+                                                                <th className="p-2 text-right">Score</th>
+                                                                <th className="p-2 text-right">B2 No</th>
+                                                                <th className="p-2 text-right">B2 Disc</th>
+                                                                <th className="p-2 text-right">B4 No</th>
+                                                                <th className="p-2 text-right">B4 Disc</th>
+                                                                <th className="p-2 text-right">Hours</th>
+                                                                <th className="p-2 text-right">Rate</th>
+                                                                <th className="p-2 text-right">Wages</th>
+                                                                <th className="p-2 text-right">Income</th>
+                                                                <th className="p-2 text-right">Profit</th>
+                                                              </tr></thead>
+                                                              <tbody>
+                                                                {dSum.detail.map((r,i)=>(
+                                                                  <tr key={`${r.recruiterId||i}_${r._rowKey||i}`} className="border-t">
+                                                                    <td className="p-2">{r.recruiterName || r.recruiterId}</td>
+                                                                    <td className="p-2">{r.project||"HF"}</td>
+                                                                    <td className="p-2">{r.shiftType||"D2D"}</td>
+                                                                    <td className="p-2">{r.location||"—"}</td>
+                                                                    <td className="p-2 text-right">{r.score}</td>
+                                                                    <td className="p-2 text-right">{Number(r.box2_noDisc)||0}</td>
+                                                                    <td className="p-2 text-right">{Number(r.box2_disc)||0}</td>
+                                                                    <td className="p-2 text-right">{Number(r.box4_noDisc)||0}</td>
+                                                                    <td className="p-2 text-right">{Number(r.box4_disc)||0}</td>
+                                                                    <td className="p-2 text-right">{r.hours ?? roleHoursDefault(r.roleAtShift||"Rookie")}</td>
+                                                                    <td className="p-2 text-right">{toMoney(rateForDate(settings, r.dateISO))}</td>
+                                                                    <td className="p-2 text-right">{toMoney(r.wages)}</td>
+                                                                    <td className="p-2 text-right">{toMoney(r.income)}</td>
+                                                                    <td className="p-2 text-right" style={{color:profitColor(r.profit)}}>{toMoney(r.profit)}</td>
+                                                                  </tr>
+                                                                ))}
+                                                              </tbody>
+                                                            </table>
+                                                          </div>
+                                                        </div>
+                                                      </td>
+                                                    </tr>
+                                                  )}
+                                                </React.Fragment>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))
+                </div>
+              )}
+            </div>
+          );
+        })
       )}
     </div>
   );
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-  Settings — projects, conversion matrix, rate bands (gated)
+  Settings (gated) — projects, conversion matrix, hourly rate bands
 ────────────────────────────────────────────────────────────────────────── */
+
 const Settings = ({ settings, setSettings }) => {
   const [unlocked, setUnlocked] = useState(!!localStorage.getItem(SETTINGS_SESSION_KEY));
   const [local, setLocal] = useState(settings);
 
   useEffect(()=>setLocal(settings),[settings]);
-
   const matrix = local.conversionType;
 
   const addProject = () => setLocal(s => ({...s, projects:[...s.projects, `Project ${s.projects.length+1}`]}));
@@ -1478,15 +1462,11 @@ const Settings = ({ settings, setSettings }) => {
   const setMatrix = (type, tier, field, val) =>
     setLocal(s => ({...s, conversionType: {...s.conversionType, [type]: {...s.conversionType[type], [tier]: {...s.conversionType[type][tier], [field]: Number(val)||0 }}}}));
 
-  const addBand = () => setLocal(s => ({...s, rateBands:[...s.rateBands, {startISO: fmtISO(new Date()), rate: 15}]}));
-  const setBand = (i, patch) => setLocal(s => {
-    const bands = [...s.rateBands]; bands[i] = {...bands[i], ...patch}; return {...s, rateBands: bands};
-  });
+  const addBand = () => setLocal(s => ({...s, rateBands:[...s.rateBands, {startISO: fmtISO(new Date()), rate: 16}]}));
+  const setBand = (i, patch) => setLocal(s => { const bands=[...s.rateBands]; bands[i]={...bands[i],...patch}; return {...s, rateBands:bands}; });
   const delBand = (i) => setLocal(s => ({...s, rateBands: s.rateBands.filter((_,idx)=>idx!==i)}));
 
-  if (!unlocked) {
-    return <Gate storageKey={SETTINGS_SESSION_KEY} label="Unlock Settings" onOk={()=>setUnlocked(true)} />;
-  }
+  if (!unlocked) return <Gate storageKey={SETTINGS_SESSION_KEY} label="Unlock Settings" onOk={()=>setUnlocked(true)} />;
 
   return (
     <div className="grid gap-4">
@@ -1544,7 +1524,7 @@ const Settings = ({ settings, setSettings }) => {
         <CardHeader><CardTitle>Hourly Rate Bands</CardTitle></CardHeader>
         <CardContent>
           <div className="grid gap-2">
-            {local.rateBands.map((b,i)=>(
+            {local.rateBands.sort((a,b)=> a.startISO<b.startISO?1:-1).map((b,i)=>(
               <div key={i} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
                 <div><Label>Start Date</Label><Input type="date" value={b.startISO} onChange={(e)=>setBand(i,{startISO:e.target.value})}/></div>
                 <div><Label>Rate €</Label><Input inputMode="decimal" value={b.rate} onChange={(e)=>setBand(i,{rate:Number(e.target.value)||0})}/></div>
@@ -1567,40 +1547,36 @@ const Settings = ({ settings, setSettings }) => {
 };
 
 /* ──────────────────────────────────────────────────────────────────────────
-  App — root
+  App — root hookup
 ────────────────────────────────────────────────────────────────────────── */
-export default function App(){
-  const [tab,setTab]=useState("planning");
 
-  // versioning
+export default function App(){
+  // keep existing versioning behavior without wiping user data
   useEffect(()=>{
     const v = localStorage.getItem(VERSION_KEY);
-    if (v!==DATA_VERSION){
-      localStorage.setItem(VERSION_KEY, DATA_VERSION);
-      // no destructive reset; we keep data
-    }
+    if (v!==DATA_VERSION) localStorage.setItem(VERSION_KEY, DATA_VERSION);
   },[]);
 
-  const [settings, setSettings] = useState(load(K.settings, DEFAULT_SETTINGS));
-  useEffect(()=>save(K.settings, settings),[settings]);
+  const [authed, setAuthed] = useState(!!localStorage.getItem(AUTH_SESSION_KEY));
+  const [tab,setTab]=useState("planning");
 
+  const [settings, setSettings]   = useState(load(K.settings, DEFAULT_SETTINGS));
+  const [pipeline, setPipeline]   = useState(load(K.pipeline, {leads:[],interview:[],formation:[]}));
   const [recruiters, setRecruiters] = useState(load(K.recruiters, []));
-  useEffect(()=>save(K.recruiters, recruiters),[recruiters]);
+  const [planning, setPlanning]   = useState(load(K.planning, {}));
+  const [history, setHistory]     = useState(load(K.history, []));
 
-  const [pipeline, setPipeline] = useState(load(K.pipeline, {leads:[],interview:[],formation:[]}));
+  useEffect(()=>save(K.settings, settings),[settings]);
   useEffect(()=>save(K.pipeline, pipeline),[pipeline]);
-
-  const [history, setHistory] = useState(load(K.history, []));
+  useEffect(()=>save(K.recruiters, recruiters),[recruiters]);
+  useEffect(()=>save(K.planning, planning),[planning]);
   useEffect(()=>save(K.history, history),[history]);
 
-  const [planning, setPlanning] = useState(load(K.planning, {}));
-  useEffect(()=>save(K.planning, planning),[planning]);
-
-  const [authed, setAuthed] = useState(!!localStorage.getItem(AUTH_SESSION_KEY));
+  // Auth gate
   if (!authed) return <Login onOk={()=>setAuthed(true)} />;
-
   const onLogout = () => { localStorage.removeItem(AUTH_SESSION_KEY); setAuthed(false); };
 
+  // Hire from Formation (always Rookie)
   const onHire = (lead) => {
     const id = crypto.randomUUID ? crypto.randomUUID() : `r_${Date.now()}`;
     const rec = {
@@ -1615,25 +1591,31 @@ export default function App(){
     setRecruiters(r=>[...r, rec]);
   };
 
-  const weekStart = fmtISO(startOfWeekMon(new Date()));
-  const badge = `Week ${weekNumberISO(parseISO(weekStart))}`;
+  const badge = tab==="planning" ? `Week ${weekNumberISO(startOfWeekMon(new Date()))}` : "";
 
   return (
     <Shell tab={tab} setTab={setTab} onLogout={onLogout} weekBadge={badge}>
       {tab==="inflow" && <Inflow pipeline={pipeline} setPipeline={setPipeline} onHire={onHire} />}
       {tab==="recruiters" && <Recruiters recruiters={recruiters} setRecruiters={setRecruiters} history={history} setHistory={setHistory} />}
       {tab==="planning" && <Planning recruiters={recruiters} planning={planning} setPlanning={setPlanning} history={history} setHistory={setHistory} />}
+
       {tab==="salary" && (
         localStorage.getItem(SALARY_SESSION_KEY)
-          ? <Salary recruiters={recruiters} history={history} />
-          : <Gate storageKey={SALARY_SESSION_KEY} label="Unlock Salary" onOk={()=>setTab("salary")} />
+          ? <Wages recruiters={recruiters} history={history} />
+          : <Gate storageKey={SALARY_SESSION_KEY} label="Re-enter credentials for Wages" onOk={()=>{}} />
       )}
+
       {tab==="finances" && (
         localStorage.getItem(FINANCE_SESSION_KEY)
           ? <Finances history={history} />
-          : <Gate storageKey={FINANCE_SESSION_KEY} label="Unlock Finances" onOk={()=>setTab("finances")} />
+          : <Gate storageKey={FINANCE_SESSION_KEY} label="Re-enter credentials for Finances" onOk={()=>{}} />
       )}
-      {tab==="settings" && <Settings settings={settings} setSettings={setSettings} />}
+
+      {tab==="settings" && (
+        localStorage.getItem(SETTINGS_SESSION_KEY)
+          ? <Settings settings={settings} setSettings={setSettings} />
+          : <Gate storageKey={SETTINGS_SESSION_KEY} label="Re-enter credentials for Settings" onOk={()=>{}} />
+      )}
     </Shell>
   );
 }
