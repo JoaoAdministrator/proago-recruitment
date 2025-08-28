@@ -1,209 +1,167 @@
 // Settings.jsx
-// Proago CRM — Settings (v2025-08-28, Chat 9)
-// Projects • Conversion Matrix • Hourly Rate Bands
+// Proago CRM — Updates: project "Hello Fresh", no € in labels, add "Delete Planning History" button
 
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
-import { Plus, X } from "lucide-react";
-import { DEFAULT_SETTINGS, save, K } from "../util";
+import { load, save, K, DEFAULT_SETTINGS, clone } from "../util";
 
 export default function Settings({ settings, setSettings }) {
-  // Local working copy so typing doesn't flicker
-  const [local, setLocal] = useState(settings || DEFAULT_SETTINGS);
 
-  useEffect(() => setLocal(settings || DEFAULT_SETTINGS), [settings]);
-
-  const setProjectName = (idx, name) =>
-    setLocal((s) => {
-      const projects = [...(s.projects || [])];
-      projects[idx] = name;
-      return { ...s, projects };
+  const onChangeRate = (i, field, value) => {
+    setSettings((s) => {
+      const next = clone(s);
+      next.rateBands[i][field] = field === "rate" ? Number(value || 0) : value;
+      return next;
     });
-
-  const addProject = () =>
-    setLocal((s) => ({ ...s, projects: [...(s.projects || []), `Project ${s.projects.length + 1}`] }));
-
-  const delProject = (idx) =>
-    setLocal((s) => ({ ...s, projects: (s.projects || []).filter((_, i) => i !== idx) }));
-
-  const setMatrix = (type, tier, field, val) =>
-    setLocal((s) => ({
-      ...s,
-      conversionType: {
-        ...(s.conversionType || DEFAULT_SETTINGS.conversionType),
-        [type]: {
-          ...(s.conversionType?.[type] || DEFAULT_SETTINGS.conversionType[type]),
-          [tier]: {
-            ...(s.conversionType?.[type]?.[tier] || DEFAULT_SETTINGS.conversionType[type][tier]),
-            [field]: Number(val) || 0,
-          },
-        },
-      },
-    }));
-
-  const addBand = () =>
-    setLocal((s) => ({
-      ...s,
-      rateBands: [...(s.rateBands || []), { startISO: new Date().toISOString().slice(0, 10), rate: 16 }],
-    }));
-
-  const setBand = (idx, patch) =>
-    setLocal((s) => {
-      const bands = [...(s.rateBands || [])];
-      bands[idx] = { ...bands[idx], ...patch };
-      return { ...s, rateBands: bands };
-    });
-
-  const delBand = (idx) =>
-    setLocal((s) => ({ ...s, rateBands: (s.rateBands || []).filter((_, i) => i !== idx) }));
-
-  const onSave = () => {
-    setSettings(local);
-    save(K.settings, local);
-    alert("Settings saved");
   };
 
-  const onReset = () => setLocal(settings || DEFAULT_SETTINGS);
+  const addRateBand = () => {
+    setSettings((s) => {
+      const next = clone(s);
+      next.rateBands.push({ startISO: "2026-01-01", rate: 16 });
+      return next;
+    });
+  };
 
-  const types = [
-    { key: "D2D", label: "Door-to-Door" },
-    { key: "EVENT", label: "Events" },
-  ];
-  const tiers = [
-    { key: "noDiscount", label: "No Discount" },
-    { key: "discount", label: "Discount" },
-  ];
+  const deletePlanningHistory = () => {
+    if (!confirm("Delete ALL planning history (shifts)? This cannot be undone.")) return;
+    try {
+      // Clear the saved shifts/history dataset
+      localStorage.removeItem(K.history);
+      alert("Planning history deleted.");
+    } catch {
+      alert("Failed to delete planning history.");
+    }
+  };
+
+  const changeProjectName = (idx, val) => {
+    setSettings((s) => {
+      const next = clone(s);
+      next.projects[idx] = val;
+      return next;
+    });
+  };
 
   return (
     <div className="grid gap-4">
-      <h3 className="font-semibold">Settings</h3>
-
-      {/* Projects */}
       <Card>
         <CardHeader>
           <CardTitle>Projects</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {(local.projects || []).map((p, i) => (
-              <div key={i} className="flex items-center gap-2 border rounded-full px-3 py-1">
-                <Input
-                  className="h-8"
-                  value={p}
-                  onChange={(e) => setProjectName(i, e.target.value)}
-                  placeholder="Project name"
-                />
-                <Button variant="ghost" size="sm" onClick={() => delProject(i)}>
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-            <Button variant="outline" size="sm" onClick={addProject}>
-              <Plus className="h-4 w-4 mr-1" />
-              Add Project
-            </Button>
-          </div>
+        <CardContent className="grid gap-3">
+          {(settings.projects || []).map((p, i) => (
+            <div key={i} className="grid gap-1">
+              <Label>Project {i + 1}</Label>
+              <Input value={p} onChange={(e) => changeProjectName(i, e.target.value)} />
+            </div>
+          ))}
+          {/* Ensure Hello Fresh is the default if blank */}
+          {(!settings.projects || settings.projects.length === 0) && (
+            <div className="text-sm text-muted-foreground">Default project: Hello Fresh</div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Conversion Matrix */}
       <Card>
         <CardHeader>
           <CardTitle>Conversion Matrix</CardTitle>
         </CardHeader>
-        <CardContent>
-          {types.map((t) => (
-            <div key={t.key} className="mb-4">
-              <div className="font-medium mb-2">{t.label}</div>
-              <div className="grid md:grid-cols-2 gap-3">
-                {tiers.map((tier) => (
-                  <div key={tier.key} className="border rounded-lg p-3">
-                    <div className="text-sm text-zinc-600 mb-2">{tier.label}</div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <Label>Box2 €</Label>
-                        <Input
-                          inputMode="decimal"
-                          value={
-                            local.conversionType?.[t.key]?.[tier.key]?.box2 ??
-                            DEFAULT_SETTINGS.conversionType[t.key][tier.key].box2
-                          }
-                          onChange={(e) => setMatrix(t.key, tier.key, "box2", e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <Label>Box4 €</Label>
-                        <Input
-                          inputMode="decimal"
-                          value={
-                            local.conversionType?.[t.key]?.[tier.key]?.box4 ??
-                            DEFAULT_SETTINGS.conversionType[t.key][tier.key].box4
-                          }
-                          onChange={(e) => setMatrix(t.key, tier.key, "box4", e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
+        <CardContent className="grid gap-4">
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="border rounded-lg p-3">
+              <div className="font-medium mb-2">Door-to-Door — No Discount</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Box 2</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.D2D.noDiscount.box2}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, noDiscount:{ ...s.conversionType.D2D.noDiscount, box2:Number(e.target.value||0) }}}}))} />
+                </div>
+                <div>
+                  <Label>Box 4</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.D2D.noDiscount.box4}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, noDiscount:{ ...s.conversionType.D2D.noDiscount, box4:Number(e.target.value||0) }}}}))} />
+                </div>
               </div>
             </div>
-          ))}
-        </CardContent>
-      </Card>
 
-      {/* Hourly Rate Bands */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Hourly Rate Bands</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-2">
-            {[...(local.rateBands || [])]
-              .sort((a, b) => (a.startISO < b.startISO ? 1 : -1)) // newest first
-              .map((band, i) => (
-                <div key={i} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end">
-                  <div>
-                    <Label>Start Date</Label>
-                    <Input
-                      type="date"
-                      value={band.startISO}
-                      onChange={(e) => setBand(i, { startISO: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <Label>Rate €</Label>
-                    <Input
-                      inputMode="decimal"
-                      value={band.rate}
-                      onChange={(e) => setBand(i, { rate: Number(e.target.value) || 0 })}
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <Button variant="destructive" onClick={() => delBand(i)}>
-                      Remove
-                    </Button>
-                  </div>
+            <div className="border rounded-lg p-3">
+              <div className="font-medium mb-2">Door-to-Door — Discount (Box 2* / Box 4*)</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Box 2*</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.D2D.discount.box2}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, discount:{ ...s.conversionType.D2D.discount, box2:Number(e.target.value||0) }}}}))} />
                 </div>
-              ))}
-            <div>
-              <Button variant="outline" onClick={addBand}>
-                <Plus className="h-4 w-4 mr-1" />
-                Add Band
-              </Button>
+                <div>
+                  <Label>Box 4*</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.D2D.discount.box4}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, discount:{ ...s.conversionType.D2D.discount, box4:Number(e.target.value||0) }}}}))} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="border rounded-lg p-3">
+              <div className="font-medium mb-2">Events — No Discount</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Box 2</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.EVENT.noDiscount.box2}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, noDiscount:{ ...s.conversionType.EVENT.noDiscount, box2:Number(e.target.value||0) }}}}))} />
+                </div>
+                <div>
+                  <Label>Box 4</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.EVENT.noDiscount.box4}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, noDiscount:{ ...s.conversionType.EVENT.noDiscount, box4:Number(e.target.value||0) }}}}))} />
+                </div>
+              </div>
+            </div>
+
+            <div className="border rounded-lg p-3">
+              <div className="font-medium mb-2">Events — Discount (Box 2* / Box 4*)</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Box 2*</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.EVENT.discount.box2}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, discount:{ ...s.conversionType.EVENT.discount, box2:Number(e.target.value||0) }}}}))} />
+                </div>
+                <div>
+                  <Label>Box 4*</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.EVENT.discount.box4}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, discount:{ ...s.conversionType.EVENT.discount, box4:Number(e.target.value||0) }}}}))} />
+                </div>
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onReset}>
-          Reset
-        </Button>
-        <Button style={{ background: "#d9010b", color: "white" }} onClick={onSave}>
-          Save Settings
+      <Card>
+        <CardHeader><CardTitle>Hourly Rate Bands</CardTitle></CardHeader>
+        <CardContent className="grid gap-3">
+          {settings.rateBands.map((b, i) => (
+            <div key={i} className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              <div className="grid gap-1">
+                <Label>Start date</Label>
+                <Input type="date" value={b.startISO} onChange={(e)=>onChangeRate(i,"startISO",e.target.value)} />
+              </div>
+              <div className="grid gap-1">
+                <Label>Rate (€)</Label>
+                <Input inputMode="numeric" value={b.rate} onChange={(e)=>onChangeRate(i,"rate",e.target.value)} />
+              </div>
+            </div>
+          ))}
+          <Button variant="outline" onClick={addRateBand}>Add Rate Band</Button>
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end">
+        <Button variant="destructive" onClick={deletePlanningHistory}>
+          Delete Planning History
         </Button>
       </div>
     </div>
