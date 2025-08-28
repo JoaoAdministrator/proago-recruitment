@@ -1,21 +1,17 @@
-// Planning.jsx — (Chat 9 base + requested changes only)
-//
-// Changes:
-// • Always opens in Inflow handled in App.jsx
-// • Removed “No shifts yet” text
-// • Edit Day modal: twice as wide horizontally (workbench size), vertical same
-// • Show recruiter rows ONLY after clicking “Add Recruiter”
-// • B2s/B4s typing bug fixed (format on blur)
-// • Day preview: zone centered, project removed
-// • Week and "Proago CRM" shown on one line are handled already in App.jsx header
-// • Date/Day header area given light gray background like column headers in Pay
+// Planning.jsx — Chat 9 baseline + requested tweaks only
+// • Remove "No shifts yet" text
+// • Edit Day is wide horizontally (same height)
+// • Show recruiter rows only after clicking "Add Recruiter"
+// • B2s/B4s one-letter bug fixed
+// • Day card preview: zone centered, project removed
+// • Date/Day header has light gray background (like Wages/Pay headers)
 
 import React, { useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { MODAL_SIZES, titleCaseFirstOnBlur, normalizeNumericOnBlur, passthrough, fmtUK } from "../util";
+import { fmtUK, passthrough, titleCaseFirstOnBlur, normalizeNumericOnBlur } from "../util";
 
 export default function Planning({ weekStartISO, setWeekStartISO, days, setDays, history, setHistory }) {
   const [editing, setEditing] = useState(null);
@@ -25,16 +21,9 @@ export default function Planning({ weekStartISO, setWeekStartISO, days, setDays,
     return Array.from({length:7}).map((_,i)=>{ const d=new Date(base); d.setDate(base.getDate()+i); return d.toISOString().slice(0,10); });
   }, [weekStartISO]);
 
-  const updateDay = (idx, patch) => setDays(prev => {
-    const next = [...prev]; next[idx] = { ...next[idx], ...patch }; return next;
-  });
+  const updateDay = (idx, patch) => setDays(prev => { const next=[...prev]; next[idx]={...next[idx],...patch}; return next; });
 
-  const addRecToDay = (idx, rec) => setDays(prev=>{
-    const next=[...prev]; const day={...next[idx]};
-    day.recruiters=[...(day.recruiters||[]), rec];
-    day.tmpRecruiter=""; day.tmpHours=""; day.tmpScore="";
-    next[idx]=day; return next;
-  });
+  const addRecToDay = (idx, rec) => setDays(prev=>{ const next=[...prev]; const day={...next[idx]}; day.recruiters=[...(day.recruiters||[]), rec]; day.tmpRecruiter=""; day.tmpHours=""; day.tmpScore=""; next[idx]=day; return next; });
 
   const saveToHistory = (idx) => {
     const d=days[idx], dateISO=d.dateISO||weekDates[idx];
@@ -62,12 +51,12 @@ export default function Planning({ weekStartISO, setWeekStartISO, days, setDays,
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {days.map((day, idx)=>(
               <div key={idx} className="border rounded-xl overflow-hidden">
-                <div className="bg-zinc-50 px-4 py-2 flex items-center justify-between">{/* gray header like Pay */}
+                <div className="bg-zinc-50 px-4 py-2 flex items-center justify-between">
                   <div className="font-medium">{fmtUK(weekDates[idx])}</div>
                   <div className="text-sm text-gray-600">Day {idx+1}</div>
                 </div>
                 <div className="p-4 space-y-2">
-                  <div className="text-center text-lg font-semibold">{day.zone||"—"}</div>{/* zone centered; no project */}
+                  <div className="text-center text-lg font-semibold">{day.zone||"—"}</div>
                   <div className="text-sm text-gray-600 flex items-center justify-center gap-4">
                     <span>B2s: {Number(day.b2s||0)}</span>
                     <span>B4s: {Number(day.b4s||0)}</span>
@@ -82,8 +71,8 @@ export default function Planning({ weekStartISO, setWeekStartISO, days, setDays,
       </Card>
 
       <Dialog open={editing!=null} onOpenChange={(v)=>!v && setEditing(null)}>
-        <DialogContent className={MODAL_SIZES.workbench.className}>{/* wider horizontally, same vertical */}
-          <div className={MODAL_SIZES.workbench.contentClass}>
+        <DialogContent className="w-[92vw] max-w-[1200px] h-[82vh]">
+          <div className="h-full overflow-auto">
             <DialogHeader className="sticky top-0 bg-white z-10 border-b"><DialogTitle>Edit Day</DialogTitle></DialogHeader>
             {editing!=null && (
               <div className="p-6 space-y-6">
