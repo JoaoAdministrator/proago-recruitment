@@ -1,5 +1,12 @@
-// Inflow.jsx — Visual Revert (keep functional fixes)
-import React, { useMemo, useState } from "react";
+// Inflow.jsx — (Chat 9 base + requested changes only)
+//
+// Changes:
+// • Leads table: Source before Calls; added Date + Time columns
+// • Auto Date/Time on add (unless import provided)
+// • Phone → Mobile (prefix dropdown + number)
+// • Interview/Formation dates are independent (not linked to Lead)
+
+import React, { useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
@@ -7,7 +14,8 @@ import { passthrough, titleCaseFirstOnBlur, normalizeNumericOnBlur, PHONE_PREFIX
 
 export default function Inflow({ leads, setLeads }) {
   const [draft, setDraft] = useState({
-    name: "", email: "", mobilePrefix: "+352", mobileNumber: "",
+    name: "", email: "",
+    mobilePrefix: "+352", mobileNumber: "",
     source: "", dateISO: "", timeHHMM: "", calls: 0,
   });
 
@@ -19,27 +27,28 @@ export default function Inflow({ leads, setLeads }) {
       id: crypto.randomUUID(),
       name: titleCaseFirstOnBlur(draft.name),
       email: draft.email.trim(),
-      mobile: `${draft.mobilePrefix}${(draft.mobileNumber || "").replace(/\s+/g, "")}`,
+      mobile: `${draft.mobilePrefix}${(draft.mobileNumber||"").replace(/\s+/g,"")}`,
       source: draft.source ? titleCaseFirstOnBlur(draft.source) : "Unknown",
       dateISO, timeHHMM, calls: clampCalls(draft.calls),
       interviewDateISO: "", interviewTimeHHMM: "",
-      formationDateISO: "", formationTimeHHMM: "", notes: "",
+      formationDateISO: "", formationTimeHHMM: "",
+      notes: "",
     };
     setLeads(prev => [newLead, ...prev]);
-    setDraft(d => ({ ...d, name:"",email:"",mobileNumber:"",source:"",dateISO:"",timeHHMM:"",calls:0 }));
+    setDraft(d => ({ ...d, name:"", email:"", mobileNumber:"", source:"", dateISO:"", timeHHMM:"", calls:0 }));
   };
 
-  const updateLead = (id, patch) => setLeads(prev => prev.map(l => l.id===id?{...l,...patch}:l));
+  const updateLead = (id, patch) => setLeads(prev => prev.map(l => (l.id===id?{...l, ...patch}:l)));
 
   const columns = [
-    { key: "name", label: "Name" },
-    { key: "mobile", label: "Mobile" },
-    { key: "email", label: "Email" },
-    { key: "date", label: "Date" },
-    { key: "time", label: "Time" },
-    { key: "source", label: "Source" },
-    { key: "calls", label: "Calls" },
-    { key: "actions", label: "Actions" },
+    { key:"name", label:"Name" },
+    { key:"mobile", label:"Mobile" }, // was Phone
+    { key:"email", label:"Email" },
+    { key:"date", label:"Date" },
+    { key:"time", label:"Time" },
+    { key:"source", label:"Source" },
+    { key:"calls", label:"Calls" },   // Source before Calls ✅
+    { key:"actions", label:"Actions" },
   ];
 
   return (
@@ -50,10 +59,10 @@ export default function Inflow({ leads, setLeads }) {
           <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
             <Input placeholder="Name" value={draft.name}
               onChange={passthrough(v=>setDraft(d=>({...d,name:v})))}
-              onBlur={e=>setDraft(d=>({...d,name:titleCaseFirstOnBlur(e.target.value)}))} />
+              onBlur={e=>setDraft(d=>({...d,name:titleCaseFirstOnBlur(e.target.value)}))}/>
             <Input type="email" placeholder="Email" value={draft.email}
               onChange={e=>setDraft(d=>({...d,email:e.target.value}))}
-              onBlur={e=>setDraft(d=>({...d,email:e.target.value.trim()}))} />
+              onBlur={e=>setDraft(d=>({...d,email:e.target.value.trim()}))}/>
             <div className="flex gap-2">
               <select className="border rounded-md px-2 h-10" value={draft.mobilePrefix}
                 onChange={passthrough(v=>setDraft(d=>({...d,mobilePrefix:v})))}>
@@ -61,13 +70,13 @@ export default function Inflow({ leads, setLeads }) {
               </select>
               <Input inputMode="tel" placeholder="Mobile Number" value={draft.mobileNumber}
                 onChange={passthrough(v=>setDraft(d=>({...d,mobileNumber:v})))}
-                onBlur={e=>setDraft(d=>({...d,mobileNumber:normalizeNumericOnBlur(e.target.value)}))} />
+                onBlur={e=>setDraft(d=>({...d,mobileNumber:normalizeNumericOnBlur(e.target.value)}))}/>
             </div>
             <Input type="date" value={draft.dateISO} onChange={passthrough(v=>setDraft(d=>({...d,dateISO:v})))} />
             <Input type="time" value={draft.timeHHMM} onChange={passthrough(v=>setDraft(d=>({...d,timeHHMM:v})))} />
             <Input placeholder="Source" value={draft.source}
               onChange={passthrough(v=>setDraft(d=>({...d,source:v})))}
-              onBlur={e=>setDraft(d=>({...d,source:titleCaseFirstOnBlur(e.target.value)}))} />
+              onBlur={e=>setDraft(d=>({...d,source:titleCaseFirstOnBlur(e.target.value)}))}/>
           </div>
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600">Calls</label>
@@ -137,7 +146,8 @@ export default function Inflow({ leads, setLeads }) {
                     </td>
                     <td className="px-3 py-2 text-center space-x-2">
                       <Button className="bg-white text-gray-800 border hover:bg-gray-50">Info</Button>
-                      <Button className="border-0" style={{background:"#fca11c",color:"#000"}} onClick={()=>moveToInterview(lead,setLeads)}>Move</Button>
+                      <Button className="border-0" style={{background:"#fca11c",color:"#000"}}
+                        onClick={()=>setLeads(prev=>prev.map(l=>l.id===lead.id?{...l,_stage:"interview"}:l))}>Move</Button>
                     </td>
                   </tr>
                 ))}
@@ -153,7 +163,7 @@ export default function Inflow({ leads, setLeads }) {
   );
 }
 
-function Stage({ title, leads, setLeads, stage }) {
+function Stage({ title, leads, setLeads, stage }){
   const rows = leads.filter(l=>l._stage===stage);
   const update = (id, patch)=> setLeads(prev=>prev.map(l=>l.id===id?{...l,...patch}:l));
   return (
@@ -212,7 +222,6 @@ function Stage({ title, leads, setLeads, stage }) {
   );
 }
 
-function moveToInterview(lead,setLeads){ setLeads(prev=>prev.map(l=>l.id===lead.id?{...l,_stage:"interview"}:l)); }
 function toISO(d){ const z=new Date(d); z.setHours(0,0,0,0); return z.toISOString().slice(0,10); }
 function toTime(d){ const z=new Date(d); const hh=String(z.getHours()).padStart(2,"0"); const mm=String(z.getMinutes()).padStart(2,"0"); return `${hh}:${mm}`; }
 function clampCalls(n){ const x=Number(n||0); return x<0?0:x>3?3:x; }
