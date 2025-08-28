@@ -1,9 +1,12 @@
-// Inflow.jsx
-// Proago CRM (v2025-08-28 • Chat 10 updates)
-// - Leads columns: Name | Mobile | Email | Source | Date | Time | Actions  (Calls moved after Source; Date/Time added)
-// - Auto Date/Time on lead add; interview & formation have independent Date/Time
-// - "Phone" → "Mobile" with prefix selector (+352/+33/+32/+49); suggestion label kept as "Mobile"
-// - Stabilized inputs to avoid focus loss while typing
+// Inflow.jsx — Proago CRM (v2025-08-29)
+// Updates:
+// • "+ Add" button (white) on the left; Import on the right
+// • Remove country emojis; display Mobile only
+// • Leads column "Calls" moved next to Actions; columns aligned across all stages (table-fixed + colgroup)
+// • Validation: must have at least Mobile OR Email
+// • Import JSON fixed (expects array of leads with name/phone/email/source)
+// • Formation: Hire button styled like "Move" but still hires
+// • Date/Time independent per stage; auto date/time on lead add
 
 import React, { useRef, useState } from "react";
 import { Button } from "../components/ui/button";
@@ -12,7 +15,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { Upload, Trash2, Plus, UserPlus } from "lucide-react";
+import { Upload, Trash2, Plus } from "lucide-react";
 import { titleCase, formatPhoneByCountry, clone, fmtISO } from "../util";
 
 const PREFIXES = ["+352", "+33", "+32", "+49"];
@@ -25,19 +28,40 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
   const [source, setSource] = useState("Indeed");
   const [calls, setCalls] = useState(0);
 
-  const reset = () => {
-    setName(""); setPrefix("+352"); setLocalMobile(""); setEmail("");
-    setSource("Indeed"); setCalls(0);
+  const buildDisplay = () => {
+    const digits = localMobile.replace(/\D+/g,"");
+    if (!digits && !email.trim()) return { ok: false, display: "" };
+    if (!digits) return { ok: true, display: "" }; // email-only
+    const raw = `${prefix}${digits}`;
+    const norm = formatPhoneByCountry(raw);
+    if (!norm.ok) return { ok: false, display: "" };
+    return { ok: true, display: norm.display };
   };
 
-  const buildDisplay = () => {
-    const raw = `${prefix}${localMobile.replace(/\D+/g,"")}`;
-    const norm = formatPhoneByCountry(raw);
-    return norm;
+  const save = () => {
+    const nm = titleCase(name);
+    if (!nm) return alert("Name required.");
+    const m = buildDisplay();
+    if (!m.ok) return alert("Provide a valid Mobile or leave Mobile empty and provide Email.");
+    if (!m.display && !email.trim()) return alert("At least Mobile or Email is required.");
+
+    const now = new Date();
+    const lead = {
+      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+      name: nm,
+      phone: m.display, // stored as "phone", shown as Mobile
+      email: email.trim(),
+      source: source.trim(),
+      calls,
+      date: fmtISO(now),
+      time: now.toTimeString().slice(0,5),
+    };
+    onSave(lead);
+    onOpenChange(false);
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { reset(); onOpenChange(v); }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>New Lead</DialogTitle></DialogHeader>
         <div className="grid gap-3">
@@ -45,8 +69,6 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
             <Label>Full Name</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-
-          {/* Mobile with prefix */}
           <div className="grid gap-1">
             <Label>Mobile</Label>
             <div className="flex gap-2">
@@ -56,13 +78,12 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
               <Input placeholder="Number" value={localMobile} inputMode="numeric"
                 onChange={(e)=>setLocalMobile(e.target.value)} />
             </div>
+            <div className="text-xs text-zinc-500">At least Mobile or Email is required.</div>
           </div>
-
           <div className="grid gap-1">
             <Label>Email</Label>
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
-
           <div className="grid gap-1">
             <Label>Source</Label>
             <select className="h-10 border rounded-md px-2" value={source} onChange={(e) => setSource(e.target.value)}>
@@ -72,39 +93,14 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
               <option>Other</option>
             </select>
           </div>
-
           <div className="grid gap-1">
             <Label>Calls (0–3)</Label>
             <Input type="number" min="0" max="3" value={calls} onChange={(e) => setCalls(Number(e.target.value))} />
           </div>
         </div>
-
         <DialogFooter className="justify-between">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button style={{ background: "#d9010b", color: "white" }}
-            onClick={() => {
-              const nm = titleCase(name);
-              if (!nm) return alert("Name required");
-
-              const norm = buildDisplay();
-              if (!norm.ok) return alert("Mobile must start with +352, +33, +32 or +49.");
-
-              const now = new Date();
-              const lead = {
-                id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
-                name: nm,
-                phone: norm.display,  // underlying key kept; column label says Mobile
-                email: email.trim(),
-                source: source.trim(),
-                flag: norm.flag,
-                calls,
-                date: fmtISO(now),         // auto lead creation date
-                time: now.toTimeString().slice(0,5), // HH:MM
-              };
-              onSave(lead);
-              onOpenChange(false);
-            }}
-          >Save</Button>
+          <Button style={{ background: "#d9010b", color: "white" }} onClick={save}>Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -116,18 +112,12 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
   const [addOpen, setAddOpen] = useState(false);
 
   const stableUpdate = (updater) => {
-    // ensures minimal re-render churn to avoid input blurs
-    setPipeline(prev => {
-      const next = clone(prev);
-      updater(next);
-      return next;
-    });
+    setPipeline(prev => { const next = clone(prev); updater(next); return next; });
   };
 
   const move = (item, from, to) => {
     stableUpdate((next) => {
       next[from] = next[from].filter((x) => x.id !== item.id);
-      // reset date/time when moving to a new stage to keep independence
       const moved = { ...item };
       if (to === "interview" || to === "formation") { moved.date = ""; moved.time = ""; }
       next[to].push(moved);
@@ -148,7 +138,33 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
     stableUpdate((next) => { next.formation = next.formation.filter((x) => x.id !== item.id); });
   };
 
-  // Section layout
+  // JSON import
+  const onImport = async (file) => {
+    if (!file) return;
+    try {
+      const txt = await file.text();
+      const json = JSON.parse(txt);
+      if (!Array.isArray(json)) throw new Error("Expected an array");
+      const nowISO = fmtISO(new Date());
+      const nowTime = new Date().toTimeString().slice(0,5);
+      const leads = json.map((j) => ({
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
+        name: titleCase(j.name || ""),
+        phone: j.phone ? formatPhoneByCountry(j.phone).display : "",
+        email: (j.email || "").trim(),
+        source: (j.source || "Indeed").trim(),
+        calls: Number(j.calls || 0),
+        date: j.date || nowISO,
+        time: j.time || nowTime,
+      })).filter(l => l.name && (l.phone || l.email));
+      if (!leads.length) return alert("No valid leads found in file.");
+      stableUpdate((next) => { next.leads = [...leads, ...next.leads]; });
+      alert(`Imported ${leads.length} lead(s).`);
+    } catch (e) {
+      alert("Invalid JSON file.");
+    }
+  };
+
   const Section = ({ title, keyName, prev, nextKey, extra }) => (
     <Card className="border-2">
       <CardHeader>
@@ -159,18 +175,26 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
       </CardHeader>
       <CardContent>
         <div className="overflow-x-auto border rounded-xl">
-          <table className="min-w-full text-sm">
+          <table className="min-w-full text-sm table-fixed">
+            <colgroup>
+              <col style={{ width: "18%" }} /> {/* Name */}
+              <col style={{ width: "18%" }} /> {/* Mobile */}
+              <col style={{ width: "18%" }} /> {/* Email */}
+              <col style={{ width: "14%" }} /> {/* Source */}
+              <col style={{ width: "12%" }} /> {/* Date */}
+              <col style={{ width: "10%" }} /> {/* Time */}
+              {keyName === "leads" ? <col style={{ width: "6%" }} /> : null} {/* Calls */}
+              <col style={{ width: keyName === "leads" ? "4%" : "14%" }} /> {/* Actions */}
+            </colgroup>
             <thead className="bg-zinc-50">
               <tr>
                 <th className="p-3 text-left">Name</th>
                 <th className="p-3">Mobile</th>
                 <th className="p-3">Email</th>
-                {/* Leads: Source then Calls; others: Date/Time */}
-                {keyName === "leads" && <th className="p-3">Source</th>}
-                {keyName === "leads" && <th className="p-3">Calls</th>}
-                {keyName !== "leads" && <th className="p-3">Source</th>}
+                <th className="p-3">Source</th>
                 <th className="p-3">Date</th>
                 <th className="p-3">Time</th>
+                {keyName === "leads" && <th className="p-3">Calls</th>}
                 <th className="p-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -178,31 +202,26 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
               {pipeline[keyName].map((x) => (
                 <tr key={x.id} className="border-t">
                   <td className="p-3 font-medium">{titleCase(x.name)}</td>
-                  <td className="p-3">{x.flag} {x.phone}</td>
+                  <td className="p-3">{x.phone}</td>
                   <td className="p-3">
-                    <Input key={`email_${x.id}`} value={x.email ?? ""}
+                    <Input value={x.email || ""}
                       onChange={(e) =>
                         stableUpdate((p) => {
-                          p[keyName] = p[keyName].map((it) => it.id === x.id ? { ...it, email: e.target.value } : it);
+                          p[keyName] = p[keyName].map((it) =>
+                            it.id === x.id ? { ...it, email: e.target.value } : it
+                          );
                         })
                       }
                     />
                   </td>
-
-                  {/* Source / Calls rendering */}
-                  <td className="p-3">
-                    {x.source}
-                  </td>
-                  {keyName === "leads" && (
-                    <td className="p-3">{x.calls ?? 0}</td>
-                  )}
-
-                  {/* Dates are independent per stage (persist on the item itself) */}
+                  <td className="p-3">{x.source}</td>
                   <td className="p-3">
                     <Input type="date" value={x.date || ""}
                       onChange={(e) =>
                         stableUpdate((p) => {
-                          p[keyName] = p[keyName].map((it) => it.id === x.id ? { ...it, date: e.target.value } : it);
+                          p[keyName] = p[keyName].map((it) =>
+                            it.id === x.id ? { ...it, date: e.target.value } : it
+                          );
                         })
                       }
                     />
@@ -211,11 +230,15 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
                     <Input type="time" value={x.time || ""}
                       onChange={(e) =>
                         stableUpdate((p) => {
-                          p[keyName] = p[keyName].map((it) => it.id === x.id ? { ...it, time: e.target.value } : it);
+                          p[keyName] = p[keyName].map((it) =>
+                            it.id === x.id ? { ...it, time: e.target.value } : it
+                          );
                         })
                       }
                     />
                   </td>
+
+                  {keyName === "leads" && <td className="p-3">{x.calls ?? 0}</td>}
 
                   <td className="p-3 flex gap-2 justify-end">
                     {prev && (
@@ -247,17 +270,14 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
       <div className="flex justify-between items-center">
         <h3 className="font-semibold">Inflow</h3>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setAddOpen(true)}>+ Add</Button>
           <Button onClick={() => fileRef.current?.click()}>
             <Upload className="h-4 w-4 mr-1" />Import
           </Button>
-          <input ref={fileRef} type="file" hidden accept="application/json" />
-          <Button style={{ background: "#d9010b", color: "white" }} onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4 mr-1" />Add Lead
-          </Button>
+          <input ref={fileRef} type="file" hidden accept="application/json" onChange={(e)=>onImport(e.target.files?.[0])} />
         </div>
       </div>
 
-      {/* Sections */}
       <Section title="Leads" keyName="leads" nextKey="interview" />
       <Section title="Interview" keyName="interview" prev="leads" nextKey="formation" />
       <Section
@@ -265,8 +285,8 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
         keyName="formation"
         prev="interview"
         extra={(x) => (
-          <Button size="sm" onClick={() => hire(x)}>
-            <UserPlus className="h-4 w-4 mr-1" />Hire
+          <Button size="sm" style={{ background: "#fca11c", color: "black" }} onClick={() => hire(x)}>
+            Move
           </Button>
         )}
       />
