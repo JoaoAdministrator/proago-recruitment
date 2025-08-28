@@ -304,7 +304,11 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
 
       {/* Edit Day (BIGGER horizontally) */}
       <Dialog open={!!editDateISO} onOpenChange={(open) => !open && closeEdit()}>
-        <DialogContent className="w-[95vw] max-w-[1600px] h-[90vh] p-4">
+        <DialogContent
+  className="!w-[95vw] !max-w-[95vw] sm:!max-w-[1600px] h-[90vh] p-4"
+  style={{ width: "95vw", maxWidth: "1600px" }}
+>
+
           <DialogHeader>
             <DialogTitle>Edit Day — {fmtUK(editDateISO || "")}</DialogTitle>
           </DialogHeader>
