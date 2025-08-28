@@ -1,14 +1,12 @@
 // Wages.jsx
-// Proago CRM — Pay page (v2025-08-28, Chat 10 updates)
-// - Top table columns trimmed: removed Hours, Crewcode, Role(s). Kept Name | Wages € | Bonus € | Total Pay € | Details
-// - Navigation label handled in App (tab shows "Pay")
+// Proago CRM — Pay page updates: labels without €, badge "August 2025" style,
+// include inactive recruiters toggle, Box labels "Box 2/Box 2*/Box 4/Box 4*"
 
 import React, { useMemo, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Label } from "../components/ui/label";
 import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
-
 import {
   load, K, DEFAULT_SETTINGS, rateForDate,
   monthKey, monthLabel, toMoney
@@ -23,7 +21,7 @@ const currentMonthKey = () => { const d = new Date(); return `${d.getUTCFullYear
 
 export default function Wages({ recruiters, history }) {
   const [payMonth, setPayMonth] = useState(currentMonthKey());
-  const [status, setStatus] = useState("all");
+  const [status, setStatus] = useState("all"); // show inactive too
   const [open, setOpen] = useState({}); // recruiterId => bool
 
   const wagesMonth = useMemo(() => prevMonthKey(payMonth), [payMonth]);
@@ -49,6 +47,7 @@ export default function Wages({ recruiters, history }) {
         const bonusShifts = history
           .filter(h => h.recruiterId === r.id && inMonth(h.dateISO || h.date, bonusMonth))
           .map(h => {
+            // Box 2/4 labels elsewhere; here we just compute
             const box2 = (Number(h.box2_noDisc) || 0) + (Number(h.box2_disc) || 0);
             const mult = (h.commissionMult != null && h.commissionMult !== "") ? Number(h.commissionMult) : roleMultiplierDefault(h.roleAtShift || r.role || "Rookie");
             const base = rookieCommission(box2);
@@ -57,9 +56,7 @@ export default function Wages({ recruiters, history }) {
           });
         const bonus = bonusShifts.reduce((s, x) => s + (Number.isFinite(x.bonus) ? x.bonus : 0), 0);
 
-        const rolesWorked = Array.from(new Set(history.filter(h => h.recruiterId === r.id && inMonth(h.dateISO || h.date, wagesMonth)).map(h => h.roleAtShift || r.role || "Rookie")));
-
-        return { recruiter: r, rolesWorked, wages, bonus, wageShifts, bonusShifts };
+        return { recruiter: r, wages, bonus, wageShifts, bonusShifts };
       });
   }, [recruiters, history, status, settings, wagesMonth, bonusMonth]);
 
@@ -70,7 +67,8 @@ export default function Wages({ recruiters, history }) {
       <div className="flex justify-between items-center">
         <div className="flex gap-2 items-center">
           <Button variant="outline" onClick={() => monthShift(-1)}><ChevronLeft className="h-4 w-4" /> Prev</Button>
-          <Badge style={{ background: "#fca11c" }}>Payday 15 {monthLabel(payMonth)}</Badge>
+          {/* Label text w/o €; numbers have € */}
+          <Badge style={{ background: "#fca11c" }}>{monthLabel(payMonth)}</Badge>
           <Button variant="outline" onClick={() => monthShift(1)}>Next <ChevronRight className="h-4 w-4" /></Button>
         </div>
         <div className="flex gap-2 items-center">
@@ -88,15 +86,14 @@ export default function Wages({ recruiters, history }) {
         <span>Bonus from <b>{monthLabel(bonusMonth)}</b></span>
       </div>
 
-      {/* Summary table (trimmed) */}
       <div className="overflow-x-auto border rounded-xl">
         <table className="min-w-full text-sm">
           <thead className="bg-zinc-50">
             <tr>
               <th className="p-3 text-left">Name</th>
-              <th className="p-3 text-right">Wages €</th>
-              <th className="p-3 text-right">Bonus €</th>
-              <th className="p-3 text-right">Total Pay €</th>
+              <th className="p-3 text-right">Wages</th>
+              <th className="p-3 text-right">Bonus</th>
+              <th className="p-3 text-right">Total Pay</th>
               <th className="p-3 text-right">Details</th>
             </tr>
           </thead>
@@ -107,9 +104,9 @@ export default function Wages({ recruiters, history }) {
                 <React.Fragment key={r.id}>
                   <tr className="border-t">
                     <td className="p-3 font-medium">{r.name}</td>
-                    <td className="p-3 text-right">{toMoney(wages)}</td>
-                    <td className="p-3 text-right">{toMoney(bonus)}</td>
-                    <td className="p-3 text-right font-medium">{toMoney(total)}</td>
+                    <td className="p-3 text-right">€{toMoney(wages)}</td>
+                    <td className="p-3 text-right">€{toMoney(bonus)}</td>
+                    <td className="p-3 text-right font-medium">€{toMoney(total)}</td>
                     <td className="p-3 text-right">
                       <Button variant="outline" size="sm" onClick={() => setOpen(o => ({ ...o, [r.id]: !o[r.id] }))}>
                         {open[r.id] ? "Hide" : "View"} <ChevronDown className="h-4 w-4 ml-1" />
@@ -130,7 +127,7 @@ export default function Wages({ recruiters, history }) {
                                   <thead className="bg-zinc-50">
                                     <tr>
                                       <th className="p-2 text-left">Date</th>
-                                      <th className="p-2 text-left">Location</th>
+                                      <th className="p-2 text-left">Zone</th>
                                       <th className="p-2 text-right">Hours</th>
                                       <th className="p-2 text-right">Rate</th>
                                       <th className="p-2 text-right">Wages</th>
@@ -142,8 +139,8 @@ export default function Wages({ recruiters, history }) {
                                         <td className="p-2">{(s.dateISO || "").slice(8,10)}/{(s.dateISO || "").slice(5,7)}/{(s.dateISO || "").slice(2,4)}</td>
                                         <td className="p-2">{s.location}</td>
                                         <td className="p-2 text-right">{s.hrs}</td>
-                                        <td className="p-2 text-right">{toMoney(s.rate)}</td>
-                                        <td className="p-2 text-right">{toMoney(s.wages)}</td>
+                                        <td className="p-2 text-right">€{toMoney(s.rate)}</td>
+                                        <td className="p-2 text-right">€{toMoney(s.wages)}</td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -159,8 +156,8 @@ export default function Wages({ recruiters, history }) {
                                   <thead className="bg-zinc-50">
                                     <tr>
                                       <th className="p-2 text-left">Date</th>
-                                      <th className="p-2 text-left">Location</th>
-                                      <th className="p-2 text-right">Box2</th>
+                                      <th className="p-2 text-left">Zone</th>
+                                      <th className="p-2 text-right">Box 2</th>
                                       <th className="p-2 text-right">Mult</th>
                                       <th className="p-2 text-right">Bonus</th>
                                     </tr>
@@ -172,7 +169,7 @@ export default function Wages({ recruiters, history }) {
                                         <td className="p-2">{s.location}</td>
                                         <td className="p-2 text-right">{s.box2}</td>
                                         <td className="p-2 text-right">{(s.mult || 1).toFixed(2)}×</td>
-                                        <td className="p-2 text-right">{toMoney(s.bonus)}</td>
+                                        <td className="p-2 text-right">€{toMoney(s.bonus)}</td>
                                       </tr>
                                     ))}
                                   </tbody>
