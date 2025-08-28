@@ -1,16 +1,13 @@
-// Wages.jsx — (Chat 9 base + requested changes only)
-//
-// Changes:
-// • Tab/UI label is “Pay” (file name unchanged)
-// • Remove Crewcode & Rank columns from the top-level list
-// • No standalone Hours column; keep “Hours Wages” + “Bonus Wages” + “Total Pay”
-// • One-letter typing fix (format on blur)
+// Wages.jsx — Chat 9 baseline + requested tweaks only
+// • Top table = Name | Hours Wages | Bonus Wages | Total Pay | Actions
+// • Remove Crewcode & Rank from the top table
+// • No standalone Hours column
+// • (Rest left as-is)
 
 import React, { useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
-import { titleCaseFirstOnBlur, passthrough, normalizeNumericOnBlur } from "../util";
 
 export default function Wages({ recruiters = [], payouts = [], setPayouts }) {
   const [query, setQuery] = useState("");
@@ -25,9 +22,7 @@ export default function Wages({ recruiters = [], payouts = [], setPayouts }) {
     <Card>
       <CardHeader className="flex items-center justify-between">
         <CardTitle>Pay</CardTitle>
-        <Input placeholder="Search by Name" value={query}
-          onChange={passthrough(setQuery)} onBlur={e=>setQuery(titleCaseFirstOnBlur(e.target.value))}
-          className="max-w-sm"/>
+        <Input placeholder="Search by Name" value={query} onChange={e=>setQuery(e.target.value)} className="max-w-sm"/>
       </CardHeader>
 
       <CardContent>
@@ -54,13 +49,13 @@ export default function Wages({ recruiters = [], payouts = [], setPayouts }) {
                     <td className="px-3 py-2 text-center">{r.name}</td>
                     <td className="px-3 py-2 text-center">
                       <Input inputMode="decimal" value={p.hoursWages??""}
-                        onChange={passthrough(v=>setPayouts(prev=>up(prev,r.id,"hoursWages",v)))}
-                        onBlur={e=>setPayouts(prev=>up(prev,r.id,"hoursWages",normalizeNumericOnBlur(e.target.value)))}/>
+                        onChange={e=>setPayouts(prev=>up(prev,r.id,"hoursWages",e.target.value))}
+                        onBlur={e=>setPayouts(prev=>up(prev,r.id,"hoursWages",cleanNum(e.target.value)))}/>
                     </td>
                     <td className="px-3 py-2 text-center">
                       <Input inputMode="decimal" value={p.bonusWages??""}
-                        onChange={passthrough(v=>setPayouts(prev=>up(prev,r.id,"bonusWages",v)))}
-                        onBlur={e=>setPayouts(prev=>up(prev,r.id,"bonusWages",normalizeNumericOnBlur(e.target.value)))}/>
+                        onChange={e=>setPayouts(prev=>up(prev,r.id,"bonusWages",e.target.value))}
+                        onBlur={e=>setPayouts(prev=>up(prev,r.id,"bonusWages",cleanNum(e.target.value)))}/>
                     </td>
                     <td className="px-3 py-2 text-center font-semibold">{total.toFixed(2)}</td>
                     <td className="px-3 py-2 text-center"><Button variant="secondary">Details</Button></td>
@@ -81,3 +76,4 @@ function up(prev, recruiterId, key, value){
   else next[i] = { ...next[i], [key]: value };
   return next;
 }
+function cleanNum(v){ const s=String(v||"").replace(/[^\d.]/g,""); const parts=s.split("."); return parts.length>1?`${parts[0]}.${parts.slice(1).join("").replace(/\./g,"")}`:s; }
