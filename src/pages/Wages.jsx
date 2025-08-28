@@ -1,4 +1,9 @@
-// Wages.jsx — Role->Rank everywhere + safe inputs already applied (v2025-08-28d)
+// Wages.jsx — Proago CRM (Final Sync Build v2025-08-28f)
+// - Tab/UI label “Pay”
+// - Top-level table: Name | Hours Wages | Bonus Wages | Total Pay | Actions
+// - Removed Crewcode & Rank columns; no standalone Hours column
+// - One-letter typing bug fixed (no formatting while typing; clean on blur)
+
 import React, { useMemo, useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
@@ -12,7 +17,7 @@ export default function Wages({ recruiters = [], payouts = [], setPayouts }) {
     const q = query.trim().toLowerCase();
     if (!q) return recruiters;
     return recruiters.filter(r =>
-      [r.name, r.crewcode, r.rank].some(v => String(v || "").toLowerCase().includes(q))
+      String(r.name || "").toLowerCase().includes(q)
     );
   }, [recruiters, query]);
 
@@ -21,21 +26,20 @@ export default function Wages({ recruiters = [], payouts = [], setPayouts }) {
       <CardHeader className="flex items-center justify-between">
         <CardTitle>Pay</CardTitle>
         <Input
-          placeholder="Search by Name / Crewcode / Rank"
+          placeholder="Search by Name"
           value={query}
           onChange={passthrough(setQuery)}
-          onBlur={(e)=> setQuery(titleCaseFirstOnBlur(e.target.value))}
+          onBlur={(e) => setQuery(titleCaseFirstOnBlur(e.target.value))}
           className="max-w-sm"
         />
       </CardHeader>
+
       <CardContent>
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr>
+              <tr className="text-left">
                 <th className="px-3 py-2 text-center text-xs text-gray-600">Name</th>
-                <th className="px-3 py-2 text-center text-xs text-gray-600">Crewcode</th>
-                <th className="px-3 py-2 text-center text-xs text-gray-600">Rank</th>
                 <th className="px-3 py-2 text-center text-xs text-gray-600">Hours Wages</th>
                 <th className="px-3 py-2 text-center text-xs text-gray-600">Bonus Wages</th>
                 <th className="px-3 py-2 text-center text-xs text-gray-600">Total Pay</th>
@@ -43,8 +47,8 @@ export default function Wages({ recruiters = [], payouts = [], setPayouts }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(r => {
-                const p = payouts.find(x => x.recruiterId === r.id) || {};
+              {filtered.map((r) => {
+                const p = payouts.find((x) => x.recruiterId === r.id) || {};
                 const hoursWages = Number(p.hoursWages || 0);
                 const bonusWages = Number(p.bonusWages || 0);
                 const total = hoursWages + bonusWages;
@@ -52,25 +56,45 @@ export default function Wages({ recruiters = [], payouts = [], setPayouts }) {
                 return (
                   <tr key={r.id} className="border-t">
                     <td className="px-3 py-2 text-center">{r.name}</td>
-                    <td className="px-3 py-2 text-center">{r.crewcode}</td>
-                    <td className="px-3 py-2 text-center">{r.rank || "-"}</td>
+
+                    {/* Hours Wages */}
                     <td className="px-3 py-2 text-center">
                       <Input
                         inputMode="decimal"
                         value={p.hoursWages ?? ""}
-                        onChange={passthrough((v)=> setPayouts(prev => up(prev, r.id, "hoursWages", v)))}
-                        onBlur={(e)=> setPayouts(prev => up(prev, r.id, "hoursWages", normalizeNumericOnBlur(e.target.value)))}
+                        onChange={passthrough((v) =>
+                          setPayouts((prev) => up(prev, r.id, "hoursWages", v))
+                        )}
+                        onBlur={(e) =>
+                          setPayouts((prev) =>
+                            up(prev, r.id, "hoursWages", normalizeNumericOnBlur(e.target.value))
+                          )
+                        }
                       />
                     </td>
+
+                    {/* Bonus Wages */}
                     <td className="px-3 py-2 text-center">
                       <Input
                         inputMode="decimal"
                         value={p.bonusWages ?? ""}
-                        onChange={passthrough((v)=> setPayouts(prev => up(prev, r.id, "bonusWages", v)))}
-                        onBlur={(e)=> setPayouts(prev => up(prev, r.id, "bonusWages", normalizeNumericOnBlur(e.target.value)))}
+                        onChange={passthrough((v) =>
+                          setPayouts((prev) => up(prev, r.id, "bonusWages", v))
+                        )}
+                        onBlur={(e) =>
+                          setPayouts((prev) =>
+                            up(prev, r.id, "bonusWages", normalizeNumericOnBlur(e.target.value))
+                          )
+                        }
                       />
                     </td>
-                    <td className="px-3 py-2 text-center font-semibold">{total.toFixed(2)}</td>
+
+                    {/* Total Pay */}
+                    <td className="px-3 py-2 text-center font-semibold">
+                      {total.toFixed(2)}
+                    </td>
+
+                    {/* Actions */}
                     <td className="px-3 py-2 text-center">
                       <Button variant="secondary">Details</Button>
                     </td>
@@ -85,9 +109,12 @@ export default function Wages({ recruiters = [], payouts = [], setPayouts }) {
   );
 }
 
+/* -------------------- helpers -------------------- */
+
+// immutably update payouts by recruiterId
 function up(prev, recruiterId, key, value) {
   const next = [...prev];
-  const i = next.findIndex(x => x.recruiterId === recruiterId);
+  const i = next.findIndex((x) => x.recruiterId === recruiterId);
   if (i === -1) next.push({ recruiterId, [key]: value });
   else next[i] = { ...next[i], [key]: value };
   return next;
