@@ -1,5 +1,9 @@
 // App.jsx
-// Proago CRM — modular build (v2025-08-28 • Chat 9 glue)
+// Proago CRM — modular build (v2025-08-28 • Chat 10 updates)
+// - Re-added Login (two accounts) with logo/name
+// - Default tab = Inflow (not Planning)
+// - Wages tab renamed to "Pay" (component file kept as Wages.jsx)
+// - Header/Badge no-wrap fixes to keep text on one line
 
 import React, { useEffect, useState } from "react";
 import { Button } from "./components/ui/button";
@@ -15,13 +19,59 @@ import {
 import Inflow from "./pages/Inflow";
 import Recruiters from "./pages/Recruiters";
 import Planning from "./pages/Planning";
-import Wages from "./pages/Wages";
+import Wages from "./pages/Wages";     // shows "Pay" now
 import Finances from "./pages/Finances";
 import Settings from "./pages/Settings";
 
-// ──────────────────────────────────────────────────────────────────────────
-// Shell (top nav + page container)
-// ──────────────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────
+  Login
+────────────────────────────────────────────────────────────────────────── */
+const LOGIN_KEY = "proago_login_v1";
+const VALID_USERS = [
+  { user: "Oscar", pass: "Sergio R4mos" },
+  { user: "Joao",  pass: "Ruben Di4s"  },
+];
+
+const Login = ({ onOk }) => {
+  const [u, setU] = useState("");
+  const [p, setP] = useState("");
+  const submit = (e) => {
+    e.preventDefault();
+    const ok = VALID_USERS.some(x => x.user === u && x.pass === p);
+    if (!ok) return alert("Invalid credentials.");
+    localStorage.setItem(LOGIN_KEY, JSON.stringify({ user: u, at: Date.now() }));
+    onOk({ user: u });
+  };
+  return (
+    <div className="min-h-screen grid place-items-center bg-zinc-50">
+      <form onSubmit={submit} className="w-[420px] max-w-[95vw] bg-white rounded-2xl p-6 shadow-sm border">
+        <div className="flex items-center gap-3 mb-4">
+          <img src="/proago-icon.png" alt="" className="h-9 w-9 rounded-full" onError={(e)=>e.currentTarget.style.display="none"} />
+          <div className="font-semibold text-xl whitespace-nowrap" style={{ fontFamily: "Lora,serif" }}>
+            Proago CRM
+          </div>
+        </div>
+        <div className="grid gap-3">
+          <div className="grid gap-1">
+            <label className="text-sm font-medium">Username</label>
+            <input className="h-10 border rounded-md px-3" value={u} onChange={(e)=>setU(e.target.value)} required />
+          </div>
+          <div className="grid gap-1">
+            <label className="text-sm font-medium">Password</label>
+            <input className="h-10 border rounded-md px-3" value={p} onChange={(e)=>setP(e.target.value)} required type="password" />
+          </div>
+          <Button type="submit" style={{ background: "#d9010b", color: "white" }} className="mt-1">
+            Sign in
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+/* ──────────────────────────────────────────────────────────────────────────
+  Shell (top nav + page container)
+────────────────────────────────────────────────────────────────────────── */
 const Shell = ({ tab, setTab, children, weekBadge }) => (
   <div className="min-h-screen">
     <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
@@ -33,10 +83,10 @@ const Shell = ({ tab, setTab, children, weekBadge }) => (
             className="h-7 w-7 rounded-full"
             onError={(e) => (e.currentTarget.style.display = "none")}
           />
-          <span className="font-semibold text-lg" style={{ fontFamily: "Lora,serif" }}>
+          <span className="font-semibold text-lg whitespace-nowrap" style={{ fontFamily: "Lora,serif" }}>
             Proago CRM
           </span>
-          {weekBadge && <Badge variant="secondary" className="ml-3">{weekBadge}</Badge>}
+          {weekBadge && <Badge variant="secondary" className="ml-3 whitespace-nowrap">{weekBadge}</Badge>}
         </div>
 
         <nav className="flex gap-2 justify-center w-full">
@@ -44,7 +94,7 @@ const Shell = ({ tab, setTab, children, weekBadge }) => (
             ["inflow", "Inflow"],
             ["recruiters", "Recruiters"],
             ["planning", "Planning"],
-            ["wages", "Wages"],
+            ["wages", "Pay"],        // label changed
             ["finances", "Finances"],
             ["settings", "Settings"],
           ].map(([key, label]) => (
@@ -69,12 +119,16 @@ const Shell = ({ tab, setTab, children, weekBadge }) => (
   </div>
 );
 
-// ──────────────────────────────────────────────────────────────────────────
-// App root
-// ──────────────────────────────────────────────────────────────────────────
+/* ──────────────────────────────────────────────────────────────────────────
+  App
+────────────────────────────────────────────────────────────────────────── */
 export default function App() {
-  // Tabs
-  const [tab, setTab] = useState("planning");
+  const [session, setSession] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(LOGIN_KEY)) || null; } catch { return null; }
+  });
+
+  // Tabs (default: Inflow)
+  const [tab, setTab] = useState("inflow");
 
   // Global state (persisted)
   const [settings, setSettings]     = useState(load(K.settings,   DEFAULT_SETTINGS));
@@ -84,19 +138,21 @@ export default function App() {
   const [history, setHistory]       = useState(load(K.history,    []));
 
   // Persist everything
-  useEffect(() => save(K.settings, settings),   [settings]);
-  useEffect(() => save(K.pipeline, pipeline),   [pipeline]);
+  useEffect(() => save(K.settings, settings),     [settings]);
+  useEffect(() => save(K.pipeline, pipeline),     [pipeline]);
   useEffect(() => save(K.recruiters, recruiters), [recruiters]);
-  useEffect(() => save(K.planning, planning),   [planning]);
-  useEffect(() => save(K.history, history),     [history]);
+  useEffect(() => save(K.planning, planning),     [planning]);
+  useEffect(() => save(K.history, history),       [history]);
 
-  // Hire from Formation → Recruiters (always Rookie, crewcode 5 digits, keep phone/email/source)
+  const onLogout = () => { localStorage.removeItem(LOGIN_KEY); setSession(null); };
+
+  // Hire from Formation → Recruiters (keep underlying fields, display words change elsewhere)
   const onHire = (lead) => {
     const id = crypto.randomUUID ? crypto.randomUUID() : `r_${Date.now()}`;
     const rec = {
       id,
       name: titleCase(lead.name || ""),
-      role: "Rookie",
+      role: "Rookie",            // underlying key kept; displayed as "Rank"
       crewCode: lead.crewCode || "",
       phone: lead.phone || "",
       email: lead.email || "",
@@ -108,8 +164,14 @@ export default function App() {
 
   const badge = tab === "planning" ? `Week ${weekNumberISO(startOfWeekMon(new Date()))}` : "";
 
+  if (!session) return <Login onOk={setSession} />;
+
   return (
     <Shell tab={tab} setTab={setTab} weekBadge={badge}>
+      <div className="flex justify-end -mt-4 mb-4">
+        <Button variant="outline" onClick={onLogout}>Logout</Button>
+      </div>
+
       {tab === "inflow" && (
         <Inflow
           pipeline={pipeline}
