@@ -1,11 +1,6 @@
 // Finances.jsx
-// Proago CRM — Finances (v2025-08-29, Chat 10 final)
-// - Full month names (via util.monthLabel with {month:"long"})
-// - Year summary table added (aligned columns like Month/Week/Day)
-// - Month/Week/Day tables: add B2/B4 split columns (No Disc / Disc)
-// - All numeric columns right-aligned and consistent order
-// - Recruiter breakdown (day details): removed Project/Type/Location; added Shifts count; kept core financials
-// - Profit colorized (green > 0, red < 0)
+// Proago CRM — Updates: year navigation (Prev/Next), column "Period", drilldown buttons: Months → Days → Shifts,
+// labels without € (only numbers show euro sign), Box labels normalized
 
 import React, { useMemo, useState } from "react";
 import { Button } from "../components/ui/button";
@@ -14,23 +9,17 @@ import {
   load, K, DEFAULT_SETTINGS, rateForDate,
   fmtISO, fmtUK, startOfWeekMon, weekNumberISO, monthKey, monthLabel, toMoney
 } from "../util";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
-const roleHoursDefault = (role) =>
-  role === "Pool Captain" ? 7 : (role === "Team Captain" || role === "Sales Manager") ? 8 : 6;
-
-const rookieCommission = (box2) => {
-  const t = {0:0,1:0,2:25,3:40,4:70,5:85,6:120,7:135,8:175,9:190,10:235};
-  return box2 <= 10 ? (t[box2] ?? 0) : 235 + (box2 - 10) * 15;
-};
-
+const roleHoursDefault = (role) => role === "Pool Captain" ? 7 : (role === "Team Captain" || role === "Sales Manager") ? 8 : 6;
+const rookieCommission = (box2) => { const t = {0:0,1:0,2:25,3:40,4:70,5:85,6:120,7:135,8:175,9:190,10:235}; return box2 <= 10 ? (t[box2] ?? 0) : 235 + (box2 - 10) * 15; };
 const profitColor = (v) => (v > 0 ? "#10b981" : v < 0 ? "#ef4444" : undefined);
 
 export default function Finances({ history }) {
   const [year, setYear] = useState(new Date().getUTCFullYear());
-  const [openYear, setOpenYear] = useState(true);    // show months under the year
-  const [openMonth, setOpenMonth] = useState({});    // "YYYY-MM" => bool
-  const [openWeek, setOpenWeek] = useState({});      // weekStartISO => bool
-  const [openDay, setOpenDay] = useState({});        // dateISO => bool
+  const [openYear, setOpenYear] = useState(true);
+  const [openMonth, setOpenMonth] = useState({});
+  const [openDay, setOpenDay] = useState({});
 
   const settings = load(K.settings, DEFAULT_SETTINGS);
   const matrix = settings.conversionType || DEFAULT_SETTINGS.conversionType;
@@ -43,22 +32,16 @@ export default function Finances({ history }) {
     return b2n * (m.noDiscount?.box2 || 0) + b2d * (m.discount?.box2 || 0)
          + b4n * (m.noDiscount?.box4 || 0) + b4d * (m.discount?.box4 || 0);
   };
-
   const calcWages = (row) => {
     const hrs = (row.hours !== "" && row.hours != null) ? Number(row.hours) : roleHoursDefault(row.roleAtShift || "Rookie");
     const rate = rateForDate(settings, row.dateISO);
     return hrs * rate;
   };
-
   const calcBonus = (row, roleAtShift) => {
     const box2 = (Number(row.box2_noDisc) || 0) + (Number(row.box2_disc) || 0);
     const mult = (row.commissionMult !== "" && row.commissionMult != null)
       ? Number(row.commissionMult)
-      : (
-          roleAtShift === "Pool Captain" ? 1.25 :
-          roleAtShift === "Team Captain" ? 1.5 :
-          roleAtShift === "Sales Manager" ? 2.0 : 1.0
-        );
+      : (roleAtShift === "Pool Captain" ? 1.25 : roleAtShift === "Team Captain" ? 1.5 : roleAtShift === "Sales Manager" ? 2.0 : 1.0);
     return rookieCommission(box2) * mult;
   };
 
@@ -108,27 +91,20 @@ export default function Finances({ history }) {
 
   const yearTotals = summarizeRows(rowsYear);
 
-  // ————————————————————————————————————————————————————————————————————————
-  // UI
-  // ————————————————————————————————————————————————————————————————————————
+  const shiftYear = (delta) => setYear(y => y + delta);
+
   return (
     <div className="grid gap-4">
-      {/* Year selector */}
-      <div className="flex items-center gap-2">
-        <Label>Year</Label>
-        <select
-          className="h-10 border rounded-md px-2"
-          value={year}
-          onChange={(e) => setYear(Number(e.target.value))}
-        >
-          {Array.from({ length: 6 }).map((_, i) => {
-            const y = new Date().getUTCFullYear() - 3 + i;
-            return <option key={y} value={y}>{y}</option>;
-          })}
-        </select>
+      {/* Year selector with prev/next */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => shiftYear(-1)}><ChevronLeft className="h-4 w-4" /> Prev</Button>
+          <div className="font-medium">{year}</div>
+          <Button variant="outline" onClick={() => shiftYear(1)}>Next <ChevronRight className="h-4 w-4" /></Button>
+        </div>
       </div>
 
-      {/* YEAR SUMMARY TABLE (single expandable row → months) */}
+      {/* YEAR SUMMARY TABLE */}
       <div className="overflow-x-auto border rounded-xl">
         <table className="min-w-full text-sm">
           <thead className="bg-zinc-50">
@@ -136,14 +112,14 @@ export default function Finances({ history }) {
               <th className="p-2 text-left">Year</th>
               <th className="p-2 text-right">Shifts</th>
               <th className="p-2 text-right">Score</th>
-              <th className="p-2 text-right">B2 No</th>
-              <th className="p-2 text-right">B2 Disc</th>
-              <th className="p-2 text-right">B4 No</th>
-              <th className="p-2 text-right">B4 Disc</th>
+              <th className="p-2 text-right">Box 2</th>
+              <th className="p-2 text-right">Box 2*</th>
+              <th className="p-2 text-right">Box 4</th>
+              <th className="p-2 text-right">Box 4*</th>
               <th className="p-2 text-right">Wages</th>
               <th className="p-2 text-right">Income</th>
               <th className="p-2 text-right">Profit</th>
-              <th className="p-2 text-right">Months</th>
+              <th className="p-2 text-right">Period</th> {/* renamed from Months */}
             </tr>
           </thead>
           <tbody>
@@ -160,26 +136,21 @@ export default function Finances({ history }) {
               <td className="p-2 text-right" style={{ color: profitColor(yearTotals.profit) }}>€{toMoney(yearTotals.profit)}</td>
               <td className="p-2 text-right">
                 <Button size="sm" variant="outline" onClick={() => setOpenYear(v => !v)}>
-                  {openYear ? "Hide" : "Expand"}
+                  {openYear ? "Hide" : "Months"} {/* button label: Months */}
                 </Button>
               </td>
             </tr>
 
-            {openYear && ymKeys.map(ym => {
+            {openYear && Object.keys(byMonth).sort().map(ym => {
               const monthRows = byMonth[ym];
-              // GROUP MONTH → WEEKS
-              const byWeek = {};
-              monthRows.forEach(r => {
-                const wkStart = fmtISO(startOfWeekMon(new Date(r.dateISO || r.date)));
-                (byWeek[wkStart] ||= []).push(r);
-              });
-              const wkKeys = Object.keys(byWeek).sort();
-
+              const byDay = {};
+              monthRows.forEach(r => { (byDay[r.dateISO || r.date] ||= []).push(r); });
+              const dayKeys = Object.keys(byDay).sort();
               const monthSum = summarizeRows(monthRows);
 
               return (
                 <React.Fragment key={ym}>
-                  {/* MONTH HEADER ROW */}
+                  {/* MONTH ROW */}
                   <tr className="border-t bg-zinc-50/50">
                     <td className="p-2 pl-6 font-medium">{monthLabel(ym)}</td>
                     <td className="p-2 text-right">{monthSum.shifts}</td>
@@ -193,111 +164,77 @@ export default function Finances({ history }) {
                     <td className="p-2 text-right" style={{ color: profitColor(monthSum.profit) }}>€{toMoney(monthSum.profit)}</td>
                     <td className="p-2 text-right">
                       <Button size="sm" variant="outline" onClick={() => setOpenMonth(s => ({ ...s, [ym]: !s[ym] }))}>
-                        {openMonth[ym] ? "Hide" : "Weeks"}
+                        {openMonth[ym] ? "Hide" : "Days"} {/* next level */}
                       </Button>
                     </td>
                   </tr>
 
-                  {/* WEEKS TABLE (inside Month) */}
-                  {openMonth[ym] && wkKeys.map(wk => {
-                    const wkRows = byWeek[wk];
-                    // GROUP WEEK → DAYS
-                    const byDay = {};
-                    wkRows.forEach(r => { (byDay[r.dateISO || r.date] ||= []).push(r); });
-                    const dayKeys = Object.keys(byDay).sort();
-                    const wkSum = summarizeRows(wkRows);
-
+                  {/* DAYS TABLE (inside Month) */}
+                  {openMonth[ym] && dayKeys.map(dk => {
+                    const dSum = summarizeRows(byDay[dk]);
                     return (
-                      <React.Fragment key={wk}>
+                      <React.Fragment key={dk}>
                         <tr className="border-t">
-                          <td className="p-2 pl-10">Week {weekNumberISO(new Date(wk))}</td>
-                          <td className="p-2 text-right">{wkSum.shifts}</td>
-                          <td className="p-2 text-right">{wkSum.score}</td>
-                          <td className="p-2 text-right">{wkSum.b2n}</td>
-                          <td className="p-2 text-right">{wkSum.b2d}</td>
-                          <td className="p-2 text-right">{wkSum.b4n}</td>
-                          <td className="p-2 text-right">{wkSum.b4d}</td>
-                          <td className="p-2 text-right">€{toMoney(wkSum.wages)}</td>
-                          <td className="p-2 text-right">€{toMoney(wkSum.income)}</td>
-                          <td className="p-2 text-right" style={{ color: profitColor(wkSum.profit) }}>€{toMoney(wkSum.profit)}</td>
+                          <td className="p-2 pl-10">{fmtUK(dk)}</td>
+                          <td className="p-2 text-right">{dSum.shifts}</td>
+                          <td className="p-2 text-right">{dSum.score}</td>
+                          <td className="p-2 text-right">{dSum.b2n}</td>
+                          <td className="p-2 text-right">{dSum.b2d}</td>
+                          <td className="p-2 text-right">{dSum.b4n}</td>
+                          <td className="p-2 text-right">{dSum.b4d}</td>
+                          <td className="p-2 text-right">€{toMoney(dSum.wages)}</td>
+                          <td className="p-2 text-right">€{toMoney(dSum.income)}</td>
+                          <td className="p-2 text-right" style={{ color: profitColor(dSum.profit) }}>€{toMoney(dSum.profit)}</td>
                           <td className="p-2 text-right">
-                            <Button size="sm" variant="outline" onClick={() => setOpenWeek(s => ({ ...s, [wk]: !s[wk] }))}>
-                              {openWeek[wk] ? "Hide" : "Days"}
+                            <Button size="sm" variant="outline" onClick={() => setOpenDay(s => ({ ...s, [dk]: !s[dk] }))}>
+                              {openDay[dk] ? "Hide" : "Shifts"} {/* last level */}
                             </Button>
                           </td>
                         </tr>
 
-                        {/* DAYS TABLE (inside Week) */}
-                        {openWeek[wk] && dayKeys.map(dk => {
-                          const dSum = summarizeRows(byDay[dk]);
-                          return (
-                            <React.Fragment key={dk}>
-                              <tr className="border-t">
-                                <td className="p-2 pl-14">{fmtUK(dk)}</td>
-                                <td className="p-2 text-right">{dSum.shifts}</td>
-                                <td className="p-2 text-right">{dSum.score}</td>
-                                <td className="p-2 text-right">{dSum.b2n}</td>
-                                <td className="p-2 text-right">{dSum.b2d}</td>
-                                <td className="p-2 text-right">{dSum.b4n}</td>
-                                <td className="p-2 text-right">{dSum.b4d}</td>
-                                <td className="p-2 text-right">€{toMoney(dSum.wages)}</td>
-                                <td className="p-2 text-right">€{toMoney(dSum.income)}</td>
-                                <td className="p-2 text-right" style={{ color: profitColor(dSum.profit) }}>€{toMoney(dSum.profit)}</td>
-                                <td className="p-2 text-right">
-                                  <Button size="sm" variant="outline" onClick={() => setOpenDay(s => ({ ...s, [dk]: !s[dk] }))}>
-                                    {openDay[dk] ? "Hide" : "Details"}
-                                  </Button>
-                                </td>
-                              </tr>
-
-                              {/* RECRUITER BREAKDOWN (inside Day) */}
-                              {openDay[dk] && (
-                                <tr>
-                                  <td colSpan={11} className="p-0">
-                                    <div className="px-3 pb-3">
-                                      <div className="overflow-x-auto border rounded-lg">
-                                        <table className="min-w-full text-sm">
-                                          <thead className="bg-zinc-50">
-                                            <tr>
-                                              <th className="p-2 text-left">Recruiter</th>
-                                              <th className="p-2 text-right">Shifts</th>
-                                              <th className="p-2 text-right">Score</th>
-                                              <th className="p-2 text-right">B2 No</th>
-                                              <th className="p-2 text-right">B2 Disc</th>
-                                              <th className="p-2 text-right">B4 No</th>
-                                              <th className="p-2 text-right">B4 Disc</th>
-                                              <th className="p-2 text-right">Wages</th>
-                                              <th className="p-2 text-right">Income</th>
-                                              <th className="p-2 text-right">Bonus</th>
-                                              <th className="p-2 text-right">Profit</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody>
-                                            {dSum.detail.map((r, i) => (
-                                              <tr key={`${r.recruiterId || i}_${r._rowKey || i}`} className="border-t">
-                                                <td className="p-2">{r.recruiterName || r.recruiterId || "—"}</td>
-                                                <td className="p-2 text-right">1</td>
-                                                <td className="p-2 text-right">{r.score}</td>
-                                                <td className="p-2 text-right">{r.b2n}</td>
-                                                <td className="p-2 text-right">{r.b2d}</td>
-                                                <td className="p-2 text-right">{r.b4n}</td>
-                                                <td className="p-2 text-right">{r.b4d}</td>
-                                                <td className="p-2 text-right">€{toMoney(r.wages)}</td>
-                                                <td className="p-2 text-right">€{toMoney(r.income)}</td>
-                                                <td className="p-2 text-right">€{toMoney(r.bonus)}</td>
-                                                <td className="p-2 text-right" style={{ color: profitColor(r.profit) }}>€{toMoney(r.profit)}</td>
-                                              </tr>
-                                            ))}
-                                          </tbody>
-                                        </table>
-                                      </div>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )}
-                            </React.Fragment>
-                          );
-                        })}
+                        {/* RECRUITER BREAKDOWN (Shifts inside Day) */}
+                        {openDay[dk] && (
+                          <tr>
+                            <td colSpan={11} className="p-0">
+                              <div className="px-3 pb-3">
+                                <div className="overflow-x-auto border rounded-lg">
+                                  <table className="min-w-full text-sm">
+                                    <thead className="bg-zinc-50">
+                                      <tr>
+                                        <th className="p-2 text-left">Recruiter</th>
+                                        <th className="p-2 text-right">Score</th>
+                                        <th className="p-2 text-right">Box 2</th>
+                                        <th className="p-2 text-right">Box 2*</th>
+                                        <th className="p-2 text-right">Box 4</th>
+                                        <th className="p-2 text-right">Box 4*</th>
+                                        <th className="p-2 text-right">Wages</th>
+                                        <th className="p-2 text-right">Income</th>
+                                        <th className="p-2 text-right">Bonus</th>
+                                        <th className="p-2 text-right">Profit</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {dSum.detail.map((r, i) => (
+                                        <tr key={`${r.recruiterId || i}_${r._rowKey || i}`} className="border-t">
+                                          <td className="p-2">{r.recruiterName || r.recruiterId || "—"}</td>
+                                          <td className="p-2 text-right">{r.score}</td>
+                                          <td className="p-2 text-right">{r.b2n}</td>
+                                          <td className="p-2 text-right">{r.b2d}</td>
+                                          <td className="p-2 text-right">{r.b4n}</td>
+                                          <td className="p-2 text-right">{r.b4d}</td>
+                                          <td className="p-2 text-right">€{toMoney(r.wages)}</td>
+                                          <td className="p-2 text-right">€{toMoney(r.income)}</td>
+                                          <td className="p-2 text-right">€{toMoney(r.bonus)}</td>
+                                          <td className="p-2 text-right" style={{ color: profitColor(r.profit) }}>€{toMoney(r.profit)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
                       </React.Fragment>
                     );
                   })}
