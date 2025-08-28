@@ -1,5 +1,9 @@
 // Inflow.jsx
-// Proago CRM component (updated build v2025-08-28 with Chat 9 changes)
+// Proago CRM (v2025-08-28 • Chat 10 updates)
+// - Leads columns: Name | Mobile | Email | Source | Date | Time | Actions  (Calls moved after Source; Date/Time added)
+// - Auto Date/Time on lead add; interview & formation have independent Date/Time
+// - "Phone" → "Mobile" with prefix selector (+352/+33/+32/+49); suggestion label kept as "Mobile"
+// - Stabilized inputs to avoid focus loss while typing
 
 import React, { useRef, useState } from "react";
 import { Button } from "../components/ui/button";
@@ -9,47 +13,56 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Upload, Trash2, Plus, UserPlus } from "lucide-react";
-import { titleCase, formatPhoneByCountry, clone } from "../util";
+import { titleCase, formatPhoneByCountry, clone, fmtISO } from "../util";
+
+const PREFIXES = ["+352", "+33", "+32", "+49"];
 
 const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  const [prefix, setPrefix] = useState("+352");
+  const [localMobile, setLocalMobile] = useState("");
   const [email, setEmail] = useState("");
   const [source, setSource] = useState("Indeed");
   const [calls, setCalls] = useState(0);
 
   const reset = () => {
-    setName("");
-    setPhone("");
-    setEmail("");
-    setSource("Indeed");
-    setCalls(0);
+    setName(""); setPrefix("+352"); setLocalMobile(""); setEmail("");
+    setSource("Indeed"); setCalls(0);
   };
 
-  const normalized = phone ? formatPhoneByCountry(phone) : { display: "", flag: "", ok: false };
+  const buildDisplay = () => {
+    const raw = `${prefix}${localMobile.replace(/\D+/g,"")}`;
+    const norm = formatPhoneByCountry(raw);
+    return norm;
+  };
+
   return (
     <Dialog open={open} onOpenChange={(v) => { reset(); onOpenChange(v); }}>
       <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>New Lead</DialogTitle>
-        </DialogHeader>
+        <DialogHeader><DialogTitle>New Lead</DialogTitle></DialogHeader>
         <div className="grid gap-3">
           <div className="grid gap-1">
-            <Label>Full name</Label>
+            <Label>Full Name</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
+
+          {/* Mobile with prefix */}
           <div className="grid gap-1">
-            <Label>Phone</Label>
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <Label>Mobile</Label>
+            <div className="flex gap-2">
+              <select className="h-10 border rounded-md px-2" value={prefix} onChange={(e)=>setPrefix(e.target.value)}>
+                {PREFIXES.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <Input placeholder="Number" value={localMobile} inputMode="numeric"
+                onChange={(e)=>setLocalMobile(e.target.value)} />
+            </div>
           </div>
+
           <div className="grid gap-1">
             <Label>Email</Label>
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
-          <div className="grid gap-1">
-            <Label>Calls (0–3)</Label>
-            <Input type="number" min="0" max="3" value={calls} onChange={(e) => setCalls(Number(e.target.value))} />
-          </div>
+
           <div className="grid gap-1">
             <Label>Source</Label>
             <select className="h-10 border rounded-md px-2" value={source} onChange={(e) => setSource(e.target.value)}>
@@ -59,25 +72,34 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
               <option>Other</option>
             </select>
           </div>
+
+          <div className="grid gap-1">
+            <Label>Calls (0–3)</Label>
+            <Input type="number" min="0" max="3" value={calls} onChange={(e) => setCalls(Number(e.target.value))} />
+          </div>
         </div>
+
         <DialogFooter className="justify-between">
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button style={{ background: "#d9010b", color: "white" }}
             onClick={() => {
               const nm = titleCase(name);
               if (!nm) return alert("Name required");
-              const norm = formatPhoneByCountry(phone);
-              if (!norm.ok) return alert("Phone must start with +352, +33, +32 or +49.");
+
+              const norm = buildDisplay();
+              if (!norm.ok) return alert("Mobile must start with +352, +33, +32 or +49.");
+
+              const now = new Date();
               const lead = {
                 id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
                 name: nm,
-                phone: norm.display,
+                phone: norm.display,  // underlying key kept; column label says Mobile
                 email: email.trim(),
                 source: source.trim(),
                 flag: norm.flag,
                 calls,
-                date: "",
-                time: ""
+                date: fmtISO(now),         // auto lead creation date
+                time: now.toTimeString().slice(0,5), // HH:MM
               };
               onSave(lead);
               onOpenChange(false);
@@ -93,32 +115,37 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
   const fileRef = useRef(null);
   const [addOpen, setAddOpen] = useState(false);
 
+  const stableUpdate = (updater) => {
+    // ensures minimal re-render churn to avoid input blurs
+    setPipeline(prev => {
+      const next = clone(prev);
+      updater(next);
+      return next;
+    });
+  };
+
   const move = (item, from, to) => {
-    const next = clone(pipeline);
-    next[from] = next[from].filter((x) => x.id !== item.id);
-    next[to].push(item);
-    setPipeline(next);
+    stableUpdate((next) => {
+      next[from] = next[from].filter((x) => x.id !== item.id);
+      // reset date/time when moving to a new stage to keep independence
+      const moved = { ...item };
+      if (to === "interview" || to === "formation") { moved.date = ""; moved.time = ""; }
+      next[to].push(moved);
+    });
   };
 
   const del = (item, from) => {
     if (!confirm("Delete?")) return;
-    const next = clone(pipeline);
-    next[from] = next[from].filter((x) => x.id !== item.id);
-    setPipeline(next);
+    stableUpdate((next) => { next[from] = next[from].filter((x) => x.id !== item.id); });
   };
 
   const hire = (item) => {
     let code = prompt("Crewcode (5 digits):");
     if (!code) return;
     code = String(code).trim();
-    if (!/^\d{5}$/.test(code)) {
-      alert("Crewcode must be exactly 5 digits.");
-      return;
-    }
+    if (!/^\d{5}$/.test(code)) { alert("Crewcode must be exactly 5 digits."); return; }
     onHire({ ...item, crewCode: code, role: "Rookie" });
-    const next = clone(pipeline);
-    next.formation = next.formation.filter((x) => x.id !== item.id);
-    setPipeline(next);
+    stableUpdate((next) => { next.formation = next.formation.filter((x) => x.id !== item.id); });
   };
 
   // Section layout
@@ -136,12 +163,14 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
             <thead className="bg-zinc-50">
               <tr>
                 <th className="p-3 text-left">Name</th>
-                <th className="p-3">Phone</th>
+                <th className="p-3">Mobile</th>
                 <th className="p-3">Email</th>
+                {/* Leads: Source then Calls; others: Date/Time */}
+                {keyName === "leads" && <th className="p-3">Source</th>}
                 {keyName === "leads" && <th className="p-3">Calls</th>}
-                <th className="p-3">Source</th>
-                {keyName !== "leads" && <th className="p-3">Date</th>}
-                {keyName !== "leads" && <th className="p-3">Time</th>}
+                {keyName !== "leads" && <th className="p-3">Source</th>}
+                <th className="p-3">Date</th>
+                <th className="p-3">Time</th>
                 <th className="p-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -151,47 +180,43 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
                   <td className="p-3 font-medium">{titleCase(x.name)}</td>
                   <td className="p-3">{x.flag} {x.phone}</td>
                   <td className="p-3">
-                    <Input value={x.email || ""}
+                    <Input key={`email_${x.id}`} value={x.email ?? ""}
                       onChange={(e) =>
-                        setPipeline((p) => ({
-                          ...p,
-                          [keyName]: p[keyName].map((it) =>
-                            it.id === x.id ? { ...it, email: e.target.value } : it
-                          )
-                        }))
+                        stableUpdate((p) => {
+                          p[keyName] = p[keyName].map((it) => it.id === x.id ? { ...it, email: e.target.value } : it);
+                        })
                       }
                     />
                   </td>
-                  {keyName === "leads" && <td className="p-3">{x.calls ?? 0}</td>}
-                  <td className="p-3">{x.source}</td>
-                  {keyName !== "leads" && (
-                    <>
-                      <td className="p-3">
-                        <Input type="date" value={x.date || ""}
-                          onChange={(e) =>
-                            setPipeline((p) => ({
-                              ...p,
-                              [keyName]: p[keyName].map((it) =>
-                                it.id === x.id ? { ...it, date: e.target.value } : it
-                              )
-                            }))
-                          }
-                        />
-                      </td>
-                      <td className="p-3">
-                        <Input type="time" value={x.time || ""}
-                          onChange={(e) =>
-                            setPipeline((p) => ({
-                              ...p,
-                              [keyName]: p[keyName].map((it) =>
-                                it.id === x.id ? { ...it, time: e.target.value } : it
-                              )
-                            }))
-                          }
-                        />
-                      </td>
-                    </>
+
+                  {/* Source / Calls rendering */}
+                  <td className="p-3">
+                    {x.source}
+                  </td>
+                  {keyName === "leads" && (
+                    <td className="p-3">{x.calls ?? 0}</td>
                   )}
+
+                  {/* Dates are independent per stage (persist on the item itself) */}
+                  <td className="p-3">
+                    <Input type="date" value={x.date || ""}
+                      onChange={(e) =>
+                        stableUpdate((p) => {
+                          p[keyName] = p[keyName].map((it) => it.id === x.id ? { ...it, date: e.target.value } : it);
+                        })
+                      }
+                    />
+                  </td>
+                  <td className="p-3">
+                    <Input type="time" value={x.time || ""}
+                      onChange={(e) =>
+                        stableUpdate((p) => {
+                          p[keyName] = p[keyName].map((it) => it.id === x.id ? { ...it, time: e.target.value } : it);
+                        })
+                      }
+                    />
+                  </td>
+
                   <td className="p-3 flex gap-2 justify-end">
                     {prev && (
                       <Button size="sm" variant="outline" style={{ background: "#fca11c", color: "black" }}
