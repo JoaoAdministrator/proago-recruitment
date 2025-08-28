@@ -1,87 +1,197 @@
-// util.js — Chat 9 baseline + EXACT requested helpers
-// • Full month names available via monthFull()
-// • Safe input helpers (fix one-letter typing issue)
-// • Phone prefixes for Mobile field
-// • Recruiter helpers used by Recruiters (last5ScoresFor, boxPercentsLast8w, avgColor)
+// util.js
+// Shared helpers for Proago CRM (v2025-08-28, Chat 9)
 
-export const K = {
-  auth: "proago.auth",
-  leads: "proago.leads",
-  recruiters: "proago.recruiters",
-  planning: "proago.planning",
-  history: "proago.history",
-  payouts: "proago.payouts",
-  settings: "proago.settings",
+// ──────────────────────────────────────────────────────────────────────────
+// LocalStorage helpers & keys
+// ──────────────────────────────────────────────────────────────────────────
+export const load = (k, fallback) => {
+  try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }
+  catch { return fallback; }
+};
+export const save = (k, v) => {
+  try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
 };
 
-export function load(key, fallback){ try{ const raw=localStorage.getItem(key); return raw?JSON.parse(raw):fallback; }catch{ return fallback; } }
-export function save(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch{} }
+export const K = {
+  recruiters: "proago_recruiters_v7",
+  pipeline:   "proago_pipeline_v6",
+  history:    "proago_history_v7_discounts",
+  planning:   "proago_planning_v6",
+  settings:   "proago_settings_v4_bands_projects",
+};
 
-// Dates
-export function fmtUK(isoOrDate){
-  const d=typeof isoOrDate==="string"?new Date(isoOrDate):new Date(isoOrDate);
-  const dd=String(d.getDate()).padStart(2,"0");
-  const mm=String(d.getMonth()+1).padStart(2,"0");
-  const yyyy=d.getFullYear(); return `${dd}/${mm}/${yyyy}`;
-}
-export function monthFull(isoYearMonth){
-  let y=0,m=0;
-  if (/^\d{4}-\d{2}$/.test(isoYearMonth)){ y=+isoYearMonth.slice(0,4); m=+isoYearMonth.slice(5,7); }
-  else { const d=new Date(isoYearMonth); y=d.getUTCFullYear(); m=d.getUTCMonth()+1; }
-  const dt=new Date(Date.UTC(y,m-1,1));
-  return dt.toLocaleDateString(undefined,{ month:"long", year:"numeric", timeZone:"UTC" });
-}
-export function startOfWeekMon(dateObj){
-  const d=new Date(dateObj); const day=(d.getDay()+6)%7;
-  const res=new Date(d); res.setDate(d.getDate()-day); res.setHours(0,0,0,0); return res;
-}
-export function weekNumberISO(dateObj){
-  const d=new Date(Date.UTC(dateObj.getFullYear(),dateObj.getMonth(),dateObj.getDate()));
-  d.setUTCDate(d.getUTCDate()+4-(d.getUTCDay()||7));
-  const yearStart=new Date(Date.UTC(d.getUTCFullYear(),0,1));
-  return Math.ceil(((d-yearStart)/86400000+1)/7);
-}
-export function monthKey(isoDate){ return isoDate ? isoDate.slice(0,7) : ""; }
-export function fmtISO(dateObj){ const d=new Date(dateObj); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); }
+// ──────────────────────────────────────────────────────────────────────────
+export const clone = typeof structuredClone === "function"
+  ? structuredClone
+  : (obj) => JSON.parse(JSON.stringify(obj));
 
-// Money
-export function toMoney(n){ return Number(n||0).toFixed(2); }
+// ──────────────────────────────────────────────────────────────────────────
+// Dates (UTC-safe) & formatting
+// ──────────────────────────────────────────────────────────────────────────
+export const fmtISO = (d) => new Date(Date.UTC(
+  d.getUTCFullYear?.() ?? d.getFullYear(),
+  d.getUTCMonth?.() ?? d.getMonth(),
+  d.getUTCDate?.() ?? d.getDate()
+)).toISOString().slice(0,10);
 
-// Input helpers (stop formatting while typing)
-export const passthrough = (setter)=>(eOrValue)=>{ const v=eOrValue?.target?eOrValue.target.value:eOrValue; setter(v); };
-export const titleCaseFirstOnBlur=(v)=>{ if(typeof v!=="string"||!v) return v??""; return v.charAt(0).toUpperCase()+v.slice(1); };
-export const normalizeNumericOnBlur=(v)=>{ if(v==null) return ""; const s=String(v).replace(/[^\d.]/g,""); const parts=s.split("."); return parts.length>1?`${parts[0]}.${parts.slice(1).join("").replace(/\./g,"")}`:s; };
+export const addDays = (date, n) => {
+  const d = new Date(date); d.setUTCDate(d.getUTCDate() + n); return d;
+};
 
-// Phone prefixes
-export const PHONE_PREFIXES = [
-  { label: "+352 (LU)", value: "+352" },
-  { label: "+33 (FR)",  value: "+33"  },
-  { label: "+32 (BE)",  value: "+32"  },
-  { label: "+49 (DE)",  value: "+49"  },
-  { label: "+41 (CH)",  value: "+41"  },
-];
+export const startOfWeekMon = (date = new Date()) => {
+  const d = new Date(Date.UTC(
+    date.getUTCFullYear?.() ?? date.getFullYear(),
+    date.getUTCMonth?.() ?? date.getMonth(),
+    date.getUTCDate?.() ?? date.getDate()
+  ));
+  const day = (d.getUTCDay() + 6) % 7; // Monday=0
+  d.setUTCDate(d.getUTCDate() - day);
+  d.setUTCHours(0,0,0,0);
+  return d;
+};
 
-// Recruiter stats used in Recruiters.jsx
-export function last5ScoresFor(history, recId){
-  if (!Array.isArray(history) || !recId) return [];
-  return history.filter(h=>h.recruiterId===recId).slice(-5).map(h=>Number(h.score)||0);
-}
-export function boxPercentsLast8w(history, recId){
-  if (!Array.isArray(history) || !recId) return { b2:0, b4:0 };
-  const now=new Date(); const cutoff=new Date(now); cutoff.setDate(now.getDate()-56);
-  let b2=0,b4=0;
-  for (const h of history){
-    const d=new Date(h.dateISO||h.date);
-    if (h.recruiterId===recId && d>=cutoff){
-      b2 += (Number(h.box2_noDisc)||0)+(Number(h.box2_disc)||0);
-      b4 += (Number(h.box4_noDisc)||0)+(Number(h.box4_disc)||0);
-    }
+export const weekNumberISO = (date) => {
+  const d = new Date(Date.UTC(
+    date.getUTCFullYear?.() ?? date.getFullYear(),
+    date.getUTCMonth?.() ?? date.getMonth(),
+    date.getUTCDate?.() ?? date.getDate()
+  ));
+  d.setUTCHours(0,0,0,0);
+  d.setUTCDate(d.getUTCDate() + 3 - ((d.getUTCDay() + 6) % 7));
+  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  firstThursday.setUTCDate(firstThursday.getUTCDate() + 3 - ((firstThursday.getUTCDay() + 6) % 7));
+  return 1 + Math.round(((d - firstThursday) / 86400000) / 7);
+};
+
+export const fmtUK = (iso) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${String(y).slice(2)}`;
+};
+
+export const monthKey = (iso) => (iso || "").slice(0, 7);
+export const monthLabel = (ym) => {
+  const [y, m] = ym.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: "short", year: "numeric", timeZone: "UTC" });
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// Money / formatting
+// ──────────────────────────────────────────────────────────────────────────
+export const toMoney = (n) => (Number(n || 0)).toFixed(2);
+
+// traffic-light color for averages (≥3 green, ≥2 yellow, else red)
+export const avgColor = (val) => {
+  const v = Number(val);
+  return v >= 3 ? "#10b981" : v >= 2 ? "#fbbf24" : "#ef4444";
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// Names & phones (strict prefixes)
+// ──────────────────────────────────────────────────────────────────────────
+export const titleCase = (s = "") =>
+  s.trim()
+   .toLowerCase()
+   .replace(/\s+/g, " ")
+   .split(" ")
+   .map(w => (w ? w[0].toUpperCase() + w.slice(1) : ""))
+   .join(" ");
+
+const FLAG_BY_CC = { "+352":" ", "+33":" ", "+32":" ", "+49":" " };
+const ALLOWED_CCS = Object.keys(FLAG_BY_CC);
+
+const normalizeDigits = (raw="") => raw.replace(/[()\-\.\s]/g,"").replace(/^00/,"+");
+const detectCC = (raw="") => { const s = normalizeDigits(raw); const cc = ALLOWED_CCS.find(cc => s.startsWith(cc)); return cc || ""; };
+
+export const formatPhoneByCountry = (raw = "") => {
+  let s = normalizeDigits(raw);
+  if (!s.startsWith("+")) return { display: "", flag: "", cc: "", ok: false };
+  const cc = detectCC(s);
+  if (!cc) return { display: "", flag: "", cc, ok: false };
+  const flag = FLAG_BY_CC[cc] || "";
+  let rest = s.slice(cc.length);
+  if (cc === "+352") {
+    rest = rest.replace(/^(\d{3})(\d{3})(\d{3})$/, "$1 $2 $3")
+               .replace(/^(\d{3})(\d{2})(\d{3})$/, "$1 $2 $3");
+  } else if (cc === "+33" || cc === "+32") {
+    rest = rest.replace(/(\d{2})(?=\d)/g, "$1 ").trim();
+  } else if (cc === "+49") {
+    rest = rest.replace(/^(\d{3})(\d{3})(\d{3,})$/, "$1 $2 $3");
   }
-  const total=b2+b4; if(!total) return { b2:0, b4:0 };
-  return { b2:(b2*100)/total, b4:(b4*100)/total };
-}
-export function avgColor(scores){
-  if (!scores || !scores.length) return "#6b7280";
-  const avg = scores.reduce((a,b)=>a+Number(b||0),0)/scores.length;
-  if (avg>=3) return "#16a34a"; if (avg>=2) return "#f59e0b"; return "#ef4444";
-}
+  return { display: `${cc} ${rest}`.trim(), flag, cc, ok: true };
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// Settings (projects, conversion matrix, rate bands)
+// ──────────────────────────────────────────────────────────────────────────
+export const DEFAULT_SETTINGS = {
+  projects: ["HF"],
+  conversionType: {
+    D2D: {
+      noDiscount: { box2: 95,  box4: 125 },
+      discount:   { box2: 80,  box4: 110 },
+    },
+    EVENT: {
+      noDiscount: { box2: 60,  box4: 70 },
+      discount:   { box2: 45,  box4: 55 },
+    },
+  },
+  rateBands: [
+    { startISO: "1900-01-01", rate: 15.2473 },
+    { startISO: "2025-05-01", rate: 15.6265 },
+  ],
+};
+
+// pick the correct hourly rate for a given date by band start
+export const rateForDate = (settings, iso) => {
+  const bands = [...(settings?.rateBands || [])].sort((a,b)=> a.startISO < b.startISO ? 1 : -1);
+  const d = iso || fmtISO(new Date());
+  const band = bands.find(b => b.startISO <= d) || bands[bands.length-1] || { rate: DEFAULT_SETTINGS.rateBands[0].rate };
+  return band.rate;
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// Performance helpers (used by Recruiters list)
+// ──────────────────────────────────────────────────────────────────────────
+export const isWithinLastWeeks = (iso, weeks = 8) => {
+  const [y,m,d]=iso.split("-").map(Number);
+  const row = new Date(Date.UTC(y, m-1, d));
+  const today = startOfWeekMon(new Date());
+  const diffDays = (today - row) / 86400000;
+  return diffDays >= 0 && diffDays <= weeks * 7;
+};
+
+export const boxTotals = (row) => {
+  const b2 = (Number(row.box2_noDisc)||0) + (Number(row.box2_disc)||0);
+  const b4 = (Number(row.box4_noDisc)||0) + (Number(row.box4_disc)||0);
+  return { b2, b4 };
+};
+
+export const last5ScoresFor = (history, recruiterId) =>
+  history
+    .filter(h => h.recruiterId === recruiterId && typeof h.score === "number")
+    .sort((a,b)=> (a.dateISO < b.dateISO ? 1 : -1))
+    .slice(0,5)
+    .map(h => Number(h.score) || 0);
+
+export const boxPercentsLast8w = (history, recruiterId) => {
+  const rows = history.filter(h => h.recruiterId === recruiterId && h.dateISO && isWithinLastWeeks(h.dateISO, 8));
+  const totals = rows.reduce((acc, r) => {
+    const { b2, b4 } = boxTotals(r);
+    acc.sales += (Number(r.score) || 0);
+    acc.b2 += b2;
+    acc.b4 += b4;
+    return acc;
+  }, { sales: 0, b2: 0, b4: 0 });
+  const pct = (n, d) => (d > 0 ? (n / d) * 100 : 0);
+  return { b2: pct(totals.b2, totals.sales), b4: pct(totals.b4, totals.sales) };
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// Role defaults (useful across pages)
+// ──────────────────────────────────────────────────────────────────────────
+export const roleHoursDefault = (role) =>
+  role === "Pool Captain" ? 7 : (role === "Team Captain" || role === "Sales Manager") ? 8 : 6;
+
+export const roleMultiplierDefault = (role) =>
+  role === "Pool Captain" ? 1.25 : role === "Team Captain" ? 1.5 : role === "Sales Manager" ? 2.0 : 1.0;
