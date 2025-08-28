@@ -1,152 +1,562 @@
-// Planning.jsx — Chat 9 baseline + requested tweaks only
-// • Remove "No shifts yet" text
-// • Edit Day is wide horizontally (same height)
-// • Show recruiter rows only after clicking "Add Recruiter"
-// • B2s/B4s one-letter bug fixed
-// • Day card preview: zone centered, project removed
-// • Date/Day header has light gray background (like Wages/Pay headers)
+// Planning.jsx
+// Proago CRM component (updated v2025-08-28 • Chat 9 changes)
 
-import React, { useMemo, useState } from "react";
-import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import React, { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
-import { fmtUK, passthrough, titleCaseFirstOnBlur, normalizeNumericOnBlur } from "../util";
+import { Label } from "../components/ui/label";
+import { Badge } from "../components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 
-export default function Planning({ weekStartISO, setWeekStartISO, days, setDays, history, setHistory }) {
-  const [editing, setEditing] = useState(null);
+import {
+  clone,
+  fmtISO,
+  fmtUK,
+  addDays,
+  startOfWeekMon,
+  weekNumberISO,
+} from "../util";
 
-  const weekDates = useMemo(() => {
-    const base = new Date(weekStartISO); base.setHours(0,0,0,0);
-    return Array.from({length:7}).map((_,i)=>{ const d=new Date(base); d.setDate(base.getDate()+i); return d.toISOString().slice(0,10); });
-  }, [weekStartISO]);
+/* ---------- helpers (local) ---------- */
+const scoreColor = (v) => (v >= 3 ? "#10b981" : v >= 2 ? "#fbbf24" : "#ef4444");
 
-  const updateDay = (idx, patch) => setDays(prev => { const next=[...prev]; next[idx]={...next[idx],...patch}; return next; });
+// upsert history by (recruiterId, dateISO, _rowKey)
+const upsertHistory = (list, row) => {
+  const key = (r) => `${r.recruiterId}|${r.dateISO}|${r._rowKey ?? -1}`;
+  const map = new Map(list.map((r) => [key(r), r]));
+  map.set(key(row), { ...(map.get(key(row)) || {}), ...row });
+  return Array.from(map.values());
+};
 
-  const addRecToDay = (idx, rec) => setDays(prev=>{ const next=[...prev]; const day={...next[idx]}; day.recruiters=[...(day.recruiters||[]), rec]; day.tmpRecruiter=""; day.tmpHours=""; day.tmpScore=""; next[idx]=day; return next; });
+// numeric value sanitizer
+const onlyNum = (s) => {
+  // allow empty (""), otherwise digits only
+  const t = String(s ?? "");
+  if (t === "") return "";
+  const m = t.match(/^\d+$/);
+  return m ? t : t.replace(/\D+/g, "");
+};
 
-  const saveToHistory = (idx) => {
-    const d=days[idx], dateISO=d.dateISO||weekDates[idx];
-    const rows=(d.recruiters||[]).map((r,i)=>({
-      _rowKey:i, dateISO, zone:d.zone||"", recruiterId:r.id||null, recruiterName:r.name||"",
-      score:Number(r.score||0), hours:Number(r.hours||0),
-      box2_noDisc:Number(d.b2s||0), box2_disc:0, box4_noDisc:Number(d.b4s||0), box4_disc:0,
-      roleAtShift:r.rank||"Rookie", shiftType:"D2D", project:"HF", location:d.zone||"", commissionMult:"",
+/* ---------- Planning ---------- */
+export default function Planning({
+  recruiters,
+  planning,
+  setPlanning,
+  history,
+  setHistory,
+}) {
+  const [weekStart, setWeekStart] = useState(
+    () => fmtISO(startOfWeekMon(new Date()))
+  );
+  const weekNum = weekNumberISO(new Date(weekStart));
+
+  // ensure week/day structure exists
+  useEffect(() => {
+    setPlanning((prev) => {
+      const next = clone(prev || {});
+      if (!next[weekStart]) next[weekStart] = { days: {} };
+      for (let i = 0; i < 7; i++) {
+        const d = fmtISO(addDays(new Date(weekStart), i));
+        if (!next[weekStart].days[d])
+          next[weekStart].days[d] = { teams: [] };
+      }
+      return next;
+    });
+  }, [weekStart, setPlanning]);
+
+  const dayData = (iso) =>
+    planning?.[weekStart]?.days?.[iso] ?? { teams: [] };
+
+  /* ---------- Edit Day (full screen) ---------- */
+  const [editDateISO, setEditDateISO] = useState(null);
+  const [draft, setDraft] = useState(null);
+
+  const openEdit = (iso) => {
+    const d = clone(dayData(iso));
+    // normalize rows to contain a stable _rowKey
+    d.teams = (d.teams || []).map((t, ti) => ({
+      zone: t.zone || "",
+      project: t.project || "HF",
+      shiftType: t.shiftType || "D2D",
+      rows: (t.rows || []).map((r, i) => ({
+        _rowKey: r?._rowKey ?? i,
+        recruiterId: r.recruiterId || "",
+        hours: r.hours ?? "",
+        commissionMult: r.commissionMult ?? "",
+        score: r.score ?? "",
+        box2_noDisc: r.box2_noDisc ?? "",
+        box2_disc: r.box2_disc ?? "",
+        box4_noDisc: r.box4_noDisc ?? "",
+        box4_disc: r.box4_disc ?? "",
+      })),
     }));
-    if (rows.length) setHistory(prev=>[...prev, ...rows]);
+    setEditDateISO(iso);
+    setDraft(d);
+  };
+
+  const closeEdit = () => {
+    setEditDateISO(null);
+    setDraft(null);
+  };
+
+  const usedIds = (d) => {
+    const s = new Set();
+    (d?.teams || []).forEach((t) =>
+      (t.rows || []).forEach((r) => r.recruiterId && s.add(r.recruiterId))
+    );
+    return s;
+  };
+
+  const addTeam = () =>
+    setDraft((d) => ({
+      ...d,
+      teams: [...(d?.teams || []), { zone: "", project: "HF", shiftType: "D2D", rows: [] }],
+    }));
+
+  const delTeam = (ti) =>
+    setDraft((d) => ({
+      ...d,
+      teams: (d?.teams || []).filter((_, i) => i !== ti),
+    }));
+
+  const setTeam = (ti, patch) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      teams[ti] = { ...teams[ti], ...patch };
+      return { ...d, teams };
+    });
+
+  const addRow = (ti) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      const nextKey = teams[ti].rows?.length || 0;
+      (teams[ti].rows ||= []).push({
+        _rowKey: nextKey,
+        recruiterId: "",
+        hours: "",
+        commissionMult: "",
+        score: "",
+        box2_noDisc: "",
+        box2_disc: "",
+        box4_noDisc: "",
+        box4_disc: "",
+      });
+      return { ...d, teams };
+    });
+
+  const delRow = (ti, ri) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      teams[ti].rows = (teams[ti].rows || []).filter((_, i) => i !== ri);
+      return { ...d, teams };
+    });
+
+  const setRow = (ti, ri, patch) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      const prevRow = teams[ti].rows[ri];
+      const nextRow = { ...prevRow, ...patch };
+
+      // prevent duplicate recruiter (allow keeping the same one)
+      if (patch.recruiterId) {
+        const ids = usedIds({ teams });
+        const already =
+          ids.has(patch.recruiterId) && prevRow.recruiterId !== patch.recruiterId;
+        if (already) {
+          alert("This recruiter is already assigned today.");
+          return d;
+        }
+      }
+
+      teams[ti].rows[ri] = nextRow;
+      return { ...d, teams };
+    });
+
+  const saveDay = () => {
+    if (!draft) return;
+    const iso = editDateISO;
+
+    // validate totals vs score
+    for (const t of draft.teams || []) {
+      for (const r of t.rows || []) {
+        const sc = Number(r.score || 0);
+        const sum =
+          Number(r.box2_noDisc || 0) +
+          Number(r.box2_disc || 0) +
+          Number(r.box4_noDisc || 0) +
+          Number(r.box4_disc || 0);
+        if (sum > sc) {
+          alert("Box2/Box4 totals (no-discount + discount) cannot exceed Score.");
+          return;
+        }
+      }
+    }
+
+    // write planning
+    setPlanning((prev) => {
+      const next = clone(prev || {});
+      if (!next[weekStart]) next[weekStart] = { days: {} };
+      next[weekStart].days[iso] = clone(draft);
+      return next;
+    });
+
+    // write history (upsert)
+    setHistory((prev) => {
+      let out = [...prev];
+      (draft.teams || []).forEach((t) => {
+        (t.rows || []).forEach((r, i) => {
+          if (!r.recruiterId) return;
+          out = upsertHistory(out, {
+            _rowKey: r._rowKey ?? i,
+            dateISO: iso,
+            recruiterId: r.recruiterId,
+            recruiterName:
+              recruiters.find((x) => x.id === r.recruiterId)?.name || "",
+            location: t.zone || "",
+            project: t.project || "HF",
+            shiftType: t.shiftType || "D2D",
+            hours: r.hours === "" ? undefined : Number(r.hours),
+            commissionMult:
+              r.commissionMult === "" ? undefined : Number(r.commissionMult),
+            score: r.score === "" ? undefined : Number(r.score),
+            box2_noDisc:
+              r.box2_noDisc === "" ? undefined : Number(r.box2_noDisc),
+            box2_disc: r.box2_disc === "" ? undefined : Number(r.box2_disc),
+            box4_noDisc:
+              r.box4_noDisc === "" ? undefined : Number(r.box4_noDisc),
+            box4_disc: r.box4_disc === "" ? undefined : Number(r.box4_disc),
+          });
+        });
+      });
+      return out;
+    });
+
+    closeEdit();
+  };
+
+  /* ---------- Day card ---------- */
+  const DayCard = ({ i }) => {
+    const dISO = fmtISO(addDays(new Date(weekStart), i));
+    const day = dayData(dISO);
+    const weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][i];
+
+    return (
+      <Card className="flex-1">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex flex-col items-center text-center">
+            <span className="leading-tight">{weekday}</span>
+            <span className="text-sm text-zinc-500 leading-tight">{fmtUK(dISO)}</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 pt-0">
+          {(day.teams || []).length ? (
+            day.teams.map((t, ti) => (
+              <div key={ti} className="border rounded-lg p-2">
+                <div className="font-medium">
+                  {t.zone || "—"} <span className="text-xs text-zinc-600">• {t.project || "HF"}</span>
+                </div>
+                {(t.rows || []).length ? (
+                  <ul className="text-sm space-y-1 mt-1">
+                    {t.rows.map((r, ri) => {
+                      const rec = recruiters.find((x) => x.id === r.recruiterId);
+                      const sc = r.score !== "" && r.score != null ? Number(r.score) : "";
+                      return (
+                        <li key={ri} className="flex items-center justify-between">
+                          <span>{rec?.name || ""}</span>
+                          <span
+                            className="text-base font-medium"
+                            style={{ color: sc !== "" ? scoreColor(sc) : undefined }}
+                          >
+                            {sc !== "" ? sc : ""}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <div className="text-sm text-zinc-500">No recruiters</div>
+                )}
+              </div>
+            ))
+          ) : (
+            <div className="text-sm text-muted-foreground">No shifts yet</div>
+          )}
+
+          <div className="flex justify-center pt-1">
+            <Button variant="outline" size="sm" onClick={() => openEdit(dISO)}>
+              Edit Day
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
   };
 
   return (
     <div className="grid gap-4">
-      <Card>
-        <CardHeader className="flex items-center justify-between">
-          <CardTitle>Planning</CardTitle>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={()=>shiftWeek(setWeekStartISO,weekStartISO,-7)}>◀ Prev</Button>
-            <input className="h-10 border rounded-md px-2" type="date" value={weekStartISO} onChange={passthrough(setWeekStartISO)} />
-            <Button variant="outline" onClick={()=>shiftWeek(setWeekStartISO,weekStartISO,+7)}>Next ▶</Button>
+      {/* Week header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() =>
+              setWeekStart(fmtISO(addDays(new Date(weekStart), -7)))
+            }
+          >
+            <ChevronLeft className="h-4 w-4" /> Prev
+          </Button>
+          <Badge style={{ background: "#fca11c" }}>Week {weekNum}</Badge>
+          <Button
+            variant="outline"
+            onClick={() =>
+              setWeekStart(fmtISO(addDays(new Date(weekStart), 7)))
+            }
+          >
+            Next <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Days grid */}
+      <div className="grid gap-4 grid-cols-1 md:grid-cols-3 xl:grid-cols-7">
+        {Array.from({ length: 7 }).map((_, i) => (
+          <DayCard key={i} i={i} />
+        ))}
+      </div>
+
+      {/* Full-screen Edit Day */}
+      <Dialog open={!!editDateISO} onOpenChange={(open) => !open && closeEdit()}>
+        <DialogContent className="max-w-[95vw] w-[95vw] h-[90vh] p-4">
+          <DialogHeader>
+            <DialogTitle>Edit Day — {fmtUK(editDateISO || "")}</DialogTitle>
+          </DialogHeader>
+
+          <div className="grid gap-3 h-[calc(90vh-5rem)] overflow-y-auto pr-1">
+            {(draft?.teams || []).map((t, ti) => {
+              const used = usedIds(draft);
+              return (
+                <div key={ti} className="border rounded-xl p-3">
+                  {/* Team header */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                    <div className="grid gap-1">
+                      <Label>Zone</Label>
+                      <Input
+                        className="h-9"
+                        value={t.zone}
+                        onChange={(e) => setTeam(ti, { zone: e.target.value })}
+                      />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label>Project</Label>
+                      <select
+                        className="h-9 border rounded-md px-2"
+                        value={t.project || "HF"}
+                        onChange={(e) => setTeam(ti, { project: e.target.value })}
+                      >
+                        <option>HF</option>
+                      </select>
+                    </div>
+                    <div className="grid gap-1">
+                      <Label>Shift Type</Label>
+                      <select
+                        className="h-9 border rounded-md px-2"
+                        value={t.shiftType || "D2D"}
+                        onChange={(e) => setTeam(ti, { shiftType: e.target.value })}
+                      >
+                        <option value="D2D">Door-to-Door</option>
+                        <option value="EVENT">Events</option>
+                      </select>
+                    </div>
+                    <div className="flex items-end justify-end">
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => delTeam(ti)}
+                      >
+                        <X className="h-4 w-4 mr-1" /> Remove
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Rows */}
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-zinc-50">
+                        <tr>
+                          <th className="p-2 text-left">Recruiter</th>
+                          <th className="p-2 text-right">Hours</th>
+                          <th className="p-2 text-right">Mult</th>
+                          <th className="p-2 text-right">Score</th>
+                          <th className="p-2 text-right">B2 No</th>
+                          <th className="p-2 text-right">B2 Disc</th>
+                          <th className="p-2 text-right">B4 No</th>
+                          <th className="p-2 text-right">B4 Disc</th>
+                          <th className="p-2 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(t.rows || []).map((r, ri) => (
+                          <tr key={ri} className="border-t">
+                            <td className="p-2">
+                              <select
+                                className="h-9 border rounded-md px-2 min-w-52"
+                                value={r.recruiterId}
+                                onChange={(e) =>
+                                  setRow(ti, ri, { recruiterId: e.target.value })
+                                }
+                              >
+                                <option value="">Select…</option>
+                                {recruiters.map((rec) => {
+                                  const disabled =
+                                    used.has(rec.id) && rec.id !== r.recruiterId;
+                                  return (
+                                    <option
+                                      key={rec.id}
+                                      value={rec.id}
+                                      disabled={disabled}
+                                    >
+                                      {rec.name}
+                                      {disabled ? " (already assigned)" : ""}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </td>
+
+                            <td className="p-2 text-right">
+                              <Input
+                                className="w-28 h-9 text-right"
+                                inputMode="numeric"
+                                value={r.hours ?? ""}
+                                onChange={(e) =>
+                                  setRow(ti, ri, { hours: onlyNum(e.target.value) })
+                                }
+                              />
+                            </td>
+
+                            <td className="p-2 text-right">
+                              <select
+                                className="h-9 border rounded-md px-2"
+                                value={r.commissionMult ?? ""}
+                                onChange={(e) =>
+                                  setRow(ti, ri, {
+                                    commissionMult: onlyNum(e.target.value),
+                                  })
+                                }
+                              >
+                                <option value="">—</option>
+                                <option value="1">100%</option>
+                                <option value="1.25">125%</option>
+                                <option value="1.5">150%</option>
+                                <option value="2">200%</option>
+                              </select>
+                            </td>
+
+                            <td className="p-2 text-right">
+                              <Input
+                                className="w-28 h-9 text-right"
+                                inputMode="numeric"
+                                value={r.score ?? ""}
+                                onChange={(e) =>
+                                  setRow(ti, ri, { score: onlyNum(e.target.value) })
+                                }
+                              />
+                            </td>
+                            <td className="p-2 text-right">
+                              <Input
+                                className="w-28 h-9 text-right"
+                                inputMode="numeric"
+                                value={r.box2_noDisc ?? ""}
+                                onChange={(e) =>
+                                  setRow(ti, ri, {
+                                    box2_noDisc: onlyNum(e.target.value),
+                                  })
+                                }
+                              />
+                            </td>
+                            <td className="p-2 text-right">
+                              <Input
+                                className="w-28 h-9 text-right"
+                                inputMode="numeric"
+                                value={r.box2_disc ?? ""}
+                                onChange={(e) =>
+                                  setRow(ti, ri, {
+                                    box2_disc: onlyNum(e.target.value),
+                                  })
+                                }
+                              />
+                            </td>
+                            <td className="p-2 text-right">
+                              <Input
+                                className="w-28 h-9 text-right"
+                                inputMode="numeric"
+                                value={r.box4_noDisc ?? ""}
+                                onChange={(e) =>
+                                  setRow(ti, ri, {
+                                    box4_noDisc: onlyNum(e.target.value),
+                                  })
+                                }
+                              />
+                            </td>
+                            <td className="p-2 text-right">
+                              <Input
+                                className="w-28 h-9 text-right"
+                                inputMode="numeric"
+                                value={r.box4_disc ?? ""}
+                                onChange={(e) =>
+                                  setRow(ti, ri, {
+                                    box4_disc: onlyNum(e.target.value),
+                                  })
+                                }
+                              />
+                            </td>
+                            <td className="p-2 text-right">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => delRow(ti, ri)}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="pt-2">
+                    <Button variant="outline" size="sm" onClick={() => addRow(ti)}>
+                      <Plus className="h-4 w-4 mr-1" /> Add Recruiter
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {days.map((day, idx)=>(
-              <div key={idx} className="border rounded-xl overflow-hidden">
-                <div className="bg-zinc-50 px-4 py-2 flex items-center justify-between">
-                  <div className="font-medium">{fmtUK(weekDates[idx])}</div>
-                  <div className="text-sm text-gray-600">Day {idx+1}</div>
-                </div>
-                <div className="p-4 space-y-2">
-                  <div className="text-center text-lg font-semibold">{day.zone||"—"}</div>
-                  <div className="text-sm text-gray-600 flex items-center justify-center gap-4">
-                    <span>B2s: {Number(day.b2s||0)}</span>
-                    <span>B4s: {Number(day.b4s||0)}</span>
-                    <span>Recs: {(day.recruiters||[]).length}</span>
-                  </div>
-                  <div className="pt-2"><Button variant="outline" onClick={()=>setEditing(idx)}>Edit Day</Button></div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
 
-      <Dialog open={editing!=null} onOpenChange={(v)=>!v && setEditing(null)}>
-        <DialogContent className="w-[92vw] max-w-[1200px] h-[82vh]">
-          <div className="h-full overflow-auto">
-            <DialogHeader className="sticky top-0 bg-white z-10 border-b"><DialogTitle>Edit Day</DialogTitle></DialogHeader>
-            {editing!=null && (
-              <div className="p-6 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <div className="md:col-span-2">
-                    <label className="text-xs text-gray-600">Zone</label>
-                    <Input value={days[editing].zone||""}
-                      onChange={passthrough(v=>updateDay(editing,{zone:v}))}
-                      onBlur={e=>updateDay(editing,{zone:titleCaseFirstOnBlur(e.target.value)})}/>
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-600">B2s</label>
-                    <Input inputMode="decimal" value={days[editing].b2s??""}
-                      onChange={passthrough(v=>updateDay(editing,{b2s:v}))}
-                      onBlur={e=>updateDay(editing,{b2s:normalizeNumericOnBlur(e.target.value)})}/>
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-600">B4s</label>
-                    <Input inputMode="decimal" value={days[editing].b4s??""}
-                      onChange={passthrough(v=>updateDay(editing,{b4s:v}))}
-                      onBlur={e=>updateDay(editing,{b4s:normalizeNumericOnBlur(e.target.value)})}/>
-                  </div>
-                </div>
-
-                <RecruitersEditor day={days[editing]} onAdd={(rec)=>addRecToDay(editing,rec)} />
-
-                <div className="flex items-center justify-end gap-2 pt-2">
-                  <Button variant="outline" onClick={()=>setEditing(null)}>Close</Button>
-                  <Button className="bg-black text-white hover:opacity-90" onClick={()=>{ saveToHistory(editing); setEditing(null); }}>
-                    Save To History
-                  </Button>
-                </div>
-              </div>
-            )}
+          <div className="flex items-center justify-between mt-3">
+            <Button variant="outline" size="sm" onClick={addTeam}>
+              <Plus className="h-4 w-4 mr-1" /> Add Team
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={closeEdit}>
+                Cancel
+              </Button>
+              <Button style={{ background: "#d9010b", color: "white" }} onClick={saveDay}>
+                Save
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
-
-function RecruitersEditor({ day, onAdd }){
-  const [open, setOpen] = useState(false);
-  const [name,setName]=useState(day.tmpRecruiter||"");
-  const [hours,setHours]=useState(day.tmpHours||"");
-  const [score,setScore]=useState(day.tmpScore||"");
-
-  const add=()=>{ if(!name.trim()) return;
-    onAdd({ id:null, name:titleCaseFirstOnBlur(name.trim()), hours:Number(hours||0), score:Number(score||0), rank:"Rookie" });
-    setName(""); setHours(""); setScore("");
-  };
-
-  return (
-    <div className="space-y-3">
-      <Button variant="secondary" onClick={()=>setOpen(true)}>Add Recruiter</Button>
-      {open && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div>
-            <label className="text-xs text-gray-600">Recruiter</label>
-            <Input value={name} onChange={passthrough(setName)} onBlur={e=>setName(titleCaseFirstOnBlur(e.target.value))}/>
-          </div>
-          <div>
-            <label className="text-xs text-gray-600">Hours</label>
-            <Input inputMode="decimal" value={hours} onChange={passthrough(setHours)} onBlur={e=>setHours(normalizeNumericOnBlur(e.target.value))}/>
-          </div>
-          <div>
-            <label className="text-xs text-gray-600">Score</label>
-            <Input inputMode="decimal" value={score} onChange={passthrough(setScore)} onBlur={e=>setScore(normalizeNumericOnBlur(e.target.value))}/>
-          </div>
-          <div className="flex items-end"><Button onClick={add}>Add</Button></div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function shiftWeek(setWeekStartISO,currentISO,deltaDays){ const d=new Date(currentISO); d.setDate(d.getDate()+deltaDays); d.setHours(0,0,0,0); setWeekStartISO(d.toISOString().slice(0,10)); }
