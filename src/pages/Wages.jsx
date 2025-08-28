@@ -1,6 +1,7 @@
 // Wages.jsx
-// Proago CRM — Wages page (v2025-08-28, Chat 9)
-// Shows Hours, Wages, Bonus, and Total Pay per recruiter with breakdowns + CSV export.
+// Proago CRM — Pay page (v2025-08-28, Chat 10 updates)
+// - Top table columns trimmed: removed Hours, Crewcode, Role(s). Kept Name | Wages € | Bonus € | Total Pay € | Details
+// - Navigation label handled in App (tab shows "Pay")
 
 import React, { useMemo, useState } from "react";
 import { Button } from "../components/ui/button";
@@ -13,74 +14,38 @@ import {
   monthKey, monthLabel, toMoney
 } from "../util";
 
-// Commission table for Box2 (rookie baseline)
-const rookieCommission = (box2) => {
-  const t = {0:0,1:0,2:25,3:40,4:70,5:85,6:120,7:135,8:175,9:190,10:235};
-  if (box2 <= 10) return t[box2] ?? 0;
-  return 235 + (box2 - 10) * 15;
-};
+const rookieCommission = (box2) => { const t = {0:0,1:0,2:25,3:40,4:70,5:85,6:120,7:135,8:175,9:190,10:235}; return box2 <= 10 ? (t[box2] ?? 0) : 235 + (box2 - 10) * 15; };
+const roleHoursDefault = (role) => role === "Pool Captain" ? 7 : (role === "Team Captain" || role === "Sales Manager") ? 8 : 6;
+const roleMultiplierDefault = (role) => role === "Pool Captain" ? 1.25 : role === "Team Captain" ? 1.5 : role === "Sales Manager" ? 2.0 : 1.0;
 
-// Role defaults (fallback if shift.hours missing)
-const roleHoursDefault = (role) =>
-  role === "Pool Captain" ? 7 : (role === "Team Captain" || role === "Sales Manager") ? 8 : 6;
-
-const roleMultiplierDefault = (role) =>
-  role === "Pool Captain" ? 1.25 : role === "Team Captain" ? 1.5 : role === "Sales Manager" ? 2.0 : 1.0;
-
-// Helpers
-const prevMonthKey = (ym) => {
-  const [Y, M] = ym.split("-").map(Number);
-  const d = new Date(Date.UTC(Y, M - 1, 1));
-  d.setUTCMonth(d.getUTCMonth() - 1);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-};
-
-const currentMonthKey = () => {
-  const d = new Date();
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-};
+const prevMonthKey = (ym) => { const [Y, M] = ym.split("-").map(Number); const d = new Date(Date.UTC(Y, M - 1, 1)); d.setUTCMonth(d.getUTCMonth() - 1); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
+const currentMonthKey = () => { const d = new Date(); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
 
 export default function Wages({ recruiters, history }) {
   const [payMonth, setPayMonth] = useState(currentMonthKey());
   const [status, setStatus] = useState("all");
   const [open, setOpen] = useState({}); // recruiterId => bool
 
-  // Reference months:
-  // - Wages = previous month relative to payday
-  // - Bonus = month before wages month
   const wagesMonth = useMemo(() => prevMonthKey(payMonth), [payMonth]);
   const bonusMonth = useMemo(() => prevMonthKey(wagesMonth), [wagesMonth]);
 
-  // Load settings to read hourly rate bands
   const settings = load(K.settings, DEFAULT_SETTINGS);
-
   const inMonth = (iso, ym) => monthKey(iso) === ym;
 
-  // Build table rows per recruiter
   const rows = useMemo(() => {
     return recruiters
       .filter(r => status === "all" ? true : status === "active" ? !r.isInactive : !!r.isInactive)
       .map(r => {
-        // Wages month rows (hours * rate)
         const wageShifts = history
           .filter(h => h.recruiterId === r.id && inMonth(h.dateISO || h.date, wagesMonth))
           .map(h => {
             const hrs = (h.hours != null && h.hours !== "") ? Number(h.hours) : roleHoursDefault(h.roleAtShift || r.role || "Rookie");
             const rate = rateForDate(settings, h.dateISO || h.date);
             const wages = hrs * rate;
-            return {
-              dateISO: h.dateISO || h.date,
-              location: h.location || "—",
-              hrs,
-              rate,
-              wages,
-            };
+            return { dateISO: h.dateISO || h.date, location: h.location || "—", hrs, rate, wages };
           });
-
-        const hours = wageShifts.reduce((s, x) => s + (Number.isFinite(x.hrs) ? x.hrs : 0), 0);
         const wages = wageShifts.reduce((s, x) => s + (Number.isFinite(x.wages) ? x.wages : 0), 0);
 
-        // Bonus month rows (commission based on Box2 and multiplier)
         const bonusShifts = history
           .filter(h => h.recruiterId === r.id && inMonth(h.dateISO || h.date, bonusMonth))
           .map(h => {
@@ -88,121 +53,47 @@ export default function Wages({ recruiters, history }) {
             const mult = (h.commissionMult != null && h.commissionMult !== "") ? Number(h.commissionMult) : roleMultiplierDefault(h.roleAtShift || r.role || "Rookie");
             const base = rookieCommission(box2);
             const bonus = base * mult;
-            return {
-              dateISO: h.dateISO || h.date,
-              location: h.location || "—",
-              box2,
-              mult,
-              bonus,
-            };
+            return { dateISO: h.dateISO || h.date, location: h.location || "—", box2, mult, bonus };
           });
-
         const bonus = bonusShifts.reduce((s, x) => s + (Number.isFinite(x.bonus) ? x.bonus : 0), 0);
 
-        const rolesWorked = Array.from(
-          new Set(
-            history
-              .filter(h => h.recruiterId === r.id && inMonth(h.dateISO || h.date, wagesMonth))
-              .map(h => h.roleAtShift || r.role || "Rookie")
-          )
-        );
+        const rolesWorked = Array.from(new Set(history.filter(h => h.recruiterId === r.id && inMonth(h.dateISO || h.date, wagesMonth)).map(h => h.roleAtShift || r.role || "Rookie")));
 
-        return {
-          recruiter: r,
-          rolesWorked,
-          hours,
-          wages,
-          bonus,
-          wageShifts,
-          bonusShifts
-        };
+        return { recruiter: r, rolesWorked, wages, bonus, wageShifts, bonusShifts };
       });
   }, [recruiters, history, status, settings, wagesMonth, bonusMonth]);
 
-  const monthShift = (delta) => {
-    const [y, m] = payMonth.split("-").map(Number);
-    const d = new Date(Date.UTC(y, m - 1, 1));
-    d.setUTCMonth(d.getUTCMonth() + delta);
-    setPayMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
-  };
-
-  const exportCSV = () => {
-    const hdr = [
-      "Name",
-      "Crewcode",
-      "Role(s)",
-      `Hours (${monthLabel(wagesMonth)})`,
-      `Wages € (${monthLabel(wagesMonth)})`,
-      `Bonus € (${monthLabel(bonusMonth)})`,
-      "Total Pay €"
-    ];
-    const lines = [hdr.join(",")];
-    rows.forEach(({ recruiter: r, rolesWorked, hours, wages, bonus }) => {
-      const total = wages + bonus;
-      lines.push([
-        `"${r.name}"`,
-        `"${r.crewCode || ""}"`,
-        `"${rolesWorked.join("/") || r.role || "Rookie"}"`,
-        hours,
-        toMoney(wages),
-        toMoney(bonus),
-        toMoney(total)
-      ].join(","));
-    });
-    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `wages_${payMonth}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const monthShift = (delta) => { const [y, m] = payMonth.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1, 1)); d.setUTCMonth(d.getUTCMonth() + delta); setPayMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`); };
 
   return (
     <div className="grid gap-4">
-      {/* Header */}
       <div className="flex justify-between items-center">
         <div className="flex gap-2 items-center">
-          <Button variant="outline" onClick={() => monthShift(-1)}>
-            <ChevronLeft className="h-4 w-4" /> Prev
-          </Button>
-          <Badge style={{ background: "#fca11c" }}>
-            Payday 15 {monthLabel(payMonth)}
-          </Badge>
-          <Button variant="outline" onClick={() => monthShift(1)}>
-            Next <ChevronRight className="h-4 w-4" />
-          </Button>
+          <Button variant="outline" onClick={() => monthShift(-1)}><ChevronLeft className="h-4 w-4" /> Prev</Button>
+          <Badge style={{ background: "#fca11c" }}>Payday 15 {monthLabel(payMonth)}</Badge>
+          <Button variant="outline" onClick={() => monthShift(1)}>Next <ChevronRight className="h-4 w-4" /></Button>
         </div>
         <div className="flex gap-2 items-center">
           <Label>Status</Label>
-          <select
-            className="h-10 border rounded-md px-2"
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-          >
+          <select className="h-10 border rounded-md px-2" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
             <option value="all">All</option>
           </select>
-          <Button onClick={exportCSV}>Export CSV</Button>
         </div>
       </div>
 
       <div className="text-sm text-muted-foreground">
-        <span>Wages from <b>{monthLabel(wagesMonth)}</b></span>
-        {" • "}
+        <span>Wages from <b>{monthLabel(wagesMonth)}</b></span>{" • "}
         <span>Bonus from <b>{monthLabel(bonusMonth)}</b></span>
       </div>
 
-      {/* Table */}
+      {/* Summary table (trimmed) */}
       <div className="overflow-x-auto border rounded-xl">
         <table className="min-w-full text-sm">
           <thead className="bg-zinc-50">
             <tr>
               <th className="p-3 text-left">Name</th>
-              <th className="p-3 text-left">Crewcode</th>
-              <th className="p-3 text-left">Role(s)</th>
-              <th className="p-3 text-right">Hours</th>
               <th className="p-3 text-right">Wages €</th>
               <th className="p-3 text-right">Bonus €</th>
               <th className="p-3 text-right">Total Pay €</th>
@@ -210,24 +101,17 @@ export default function Wages({ recruiters, history }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ recruiter: r, rolesWorked, hours, wages, bonus, wageShifts, bonusShifts }) => {
+            {rows.map(({ recruiter: r, wages, bonus, wageShifts, bonusShifts }) => {
               const total = wages + bonus;
               return (
                 <React.Fragment key={r.id}>
                   <tr className="border-t">
                     <td className="p-3 font-medium">{r.name}</td>
-                    <td className="p-3">{r.crewCode}</td>
-                    <td className="p-3">{rolesWorked.join("/") || r.role || "Rookie"}</td>
-                    <td className="p-3 text-right">{hours}</td>
                     <td className="p-3 text-right">{toMoney(wages)}</td>
                     <td className="p-3 text-right">{toMoney(bonus)}</td>
                     <td className="p-3 text-right font-medium">{toMoney(total)}</td>
                     <td className="p-3 text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setOpen(o => ({ ...o, [r.id]: !o[r.id] }))}
-                      >
+                      <Button variant="outline" size="sm" onClick={() => setOpen(o => ({ ...o, [r.id]: !o[r.id] }))}>
                         {open[r.id] ? "Hide" : "View"} <ChevronDown className="h-4 w-4 ml-1" />
                       </Button>
                     </td>
@@ -235,14 +119,12 @@ export default function Wages({ recruiters, history }) {
 
                   {open[r.id] && (
                     <tr>
-                      <td colSpan={8} className="p-0">
+                      <td colSpan={5} className="p-0">
                         <div className="px-3 pb-3">
                           <div className="grid md:grid-cols-2 gap-3">
                             {/* Wages breakdown */}
                             <div className="border rounded-lg overflow-hidden">
-                              <div className="px-3 py-2 bg-zinc-50 font-medium">
-                                Wages — {monthLabel(wagesMonth)}
-                              </div>
+                              <div className="px-3 py-2 bg-zinc-50 font-medium">Wages — {monthLabel(wagesMonth)}</div>
                               <div className="overflow-x-auto">
                                 <table className="min-w-full text-sm">
                                   <thead className="bg-zinc-50">
@@ -271,9 +153,7 @@ export default function Wages({ recruiters, history }) {
 
                             {/* Bonus breakdown */}
                             <div className="border rounded-lg overflow-hidden">
-                              <div className="px-3 py-2 bg-zinc-50 font-medium">
-                                Bonus — {monthLabel(bonusMonth)}
-                              </div>
+                              <div className="px-3 py-2 bg-zinc-50 font-medium">Bonus — {monthLabel(bonusMonth)}</div>
                               <div className="overflow-x-auto">
                                 <table className="min-w-full text-sm">
                                   <thead className="bg-zinc-50">
