@@ -1,16 +1,8 @@
-// util.js — Proago CRM (Chat 9 base + requested changes only)
-//
-// Changes:
-// • Full month names helpers available (monthFull)
-// • Safe input helpers to fix one-letter typing issue
+// util.js — Chat 9 baseline + EXACT requested helpers
+// • Full month names available via monthFull()
+// • Safe input helpers (fix one-letter typing issue)
 // • Phone prefixes for Mobile field
-// • Recruiter stats helpers used by Recruiters (last5ScoresFor, boxPercentsLast8w, avgColor)
-
-export const BRAND = {
-  primary: "#d9010b",
-  secondary: "#eb2a2a",
-  accent: "#fca11c",
-};
+// • Recruiter helpers used by Recruiters (last5ScoresFor, boxPercentsLast8w, avgColor)
 
 export const K = {
   auth: "proago.auth",
@@ -25,31 +17,12 @@ export const K = {
 export function load(key, fallback){ try{ const raw=localStorage.getItem(key); return raw?JSON.parse(raw):fallback; }catch{ return fallback; } }
 export function save(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch{} }
 
-// ----- Settings fallbacks (used by Finances if Settings empty) -----
-export const DEFAULT_SETTINGS = {
-  hourlyRateBands: [{ effectiveFrom: "2025-01-01", rate: 15 }],
-  conversionType: {
-    D2D:   { noDiscount: { box2:120, box4:240 }, discount: { box2:90, box4:180 } },
-    EVENT: { noDiscount: { box2:140, box4:260 }, discount: { box2:100, box4:200 } },
-  },
-};
-
-export function rateForDate(settings, dateISO){
-  const bands = (settings?.hourlyRateBands || DEFAULT_SETTINGS.hourlyRateBands).slice()
-    .sort((a,b)=>a.effectiveFrom.localeCompare(b.effectiveFrom));
-  const d = dateISO || new Date().toISOString().slice(0,10);
-  let picked = bands[0]?.rate ?? 15;
-  for (const b of bands) if (d >= b.effectiveFrom) picked = b.rate;
-  return Number(picked||0);
-}
-
-// ----- Dates -----
+// Dates
 export function fmtUK(isoOrDate){
-  const d = typeof isoOrDate==="string" ? new Date(isoOrDate) : new Date(isoOrDate);
+  const d=typeof isoOrDate==="string"?new Date(isoOrDate):new Date(isoOrDate);
   const dd=String(d.getDate()).padStart(2,"0");
   const mm=String(d.getMonth()+1).padStart(2,"0");
-  const yyyy=d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  const yyyy=d.getFullYear(); return `${dd}/${mm}/${yyyy}`;
 }
 export function monthFull(isoYearMonth){
   let y=0,m=0;
@@ -63,7 +36,7 @@ export function startOfWeekMon(dateObj){
   const res=new Date(d); res.setDate(d.getDate()-day); res.setHours(0,0,0,0); return res;
 }
 export function weekNumberISO(dateObj){
-  const d=new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
+  const d=new Date(Date.UTC(dateObj.getFullYear(),dateObj.getMonth(),dateObj.getDate()));
   d.setUTCDate(d.getUTCDate()+4-(d.getUTCDay()||7));
   const yearStart=new Date(Date.UTC(d.getUTCFullYear(),0,1));
   return Math.ceil(((d-yearStart)/86400000+1)/7);
@@ -71,16 +44,15 @@ export function weekNumberISO(dateObj){
 export function monthKey(isoDate){ return isoDate ? isoDate.slice(0,7) : ""; }
 export function fmtISO(dateObj){ const d=new Date(dateObj); d.setHours(0,0,0,0); return d.toISOString().slice(0,10); }
 
-// ----- Money -----
+// Money
 export function toMoney(n){ return Number(n||0).toFixed(2); }
 
-// ----- Input helpers (fix one-letter bug) -----
-export const passthrough = (setter) => (eOrValue)=>{ const v=eOrValue?.target?eOrValue.target.value:eOrValue; setter(v); };
-export const titleCaseFirstOnBlur = (value)=>{ if(typeof value!=="string"||!value) return value??""; return value.charAt(0).toUpperCase()+value.slice(1); };
-export const normalizeNumericOnBlur = (value)=>{ if(value==null) return ""; const s=String(value).replace(/[^\d.]/g,""); const parts=s.split("."); return parts.length>1?`${parts[0]}.${parts.slice(1).join("").replace(/\./g,"")}`:s; };
-export const emailOnChange = passthrough;
+// Input helpers (stop formatting while typing)
+export const passthrough = (setter)=>(eOrValue)=>{ const v=eOrValue?.target?eOrValue.target.value:eOrValue; setter(v); };
+export const titleCaseFirstOnBlur=(v)=>{ if(typeof v!=="string"||!v) return v??""; return v.charAt(0).toUpperCase()+v.slice(1); };
+export const normalizeNumericOnBlur=(v)=>{ if(v==null) return ""; const s=String(v).replace(/[^\d.]/g,""); const parts=s.split("."); return parts.length>1?`${parts[0]}.${parts.slice(1).join("").replace(/\./g,"")}`:s; };
 
-// ----- Phone prefixes -----
+// Phone prefixes
 export const PHONE_PREFIXES = [
   { label: "+352 (LU)", value: "+352" },
   { label: "+33 (FR)",  value: "+33"  },
@@ -89,12 +61,7 @@ export const PHONE_PREFIXES = [
   { label: "+41 (CH)",  value: "+41"  },
 ];
 
-// ----- Modal size shared between Edit Day & Recruiter Info -----
-export const MODAL_SIZES = {
-  workbench: { className: "w-[92vw] max-w-[1200px] h-[82vh]", contentClass: "h-full overflow-auto" },
-};
-
-// ----- Recruiter stats helpers (used by Recruiters.jsx) -----
+// Recruiter stats used in Recruiters.jsx
 export function last5ScoresFor(history, recId){
   if (!Array.isArray(history) || !recId) return [];
   return history.filter(h=>h.recruiterId===recId).slice(-5).map(h=>Number(h.score)||0);
@@ -106,12 +73,12 @@ export function boxPercentsLast8w(history, recId){
   for (const h of history){
     const d=new Date(h.dateISO||h.date);
     if (h.recruiterId===recId && d>=cutoff){
-      b2 += (Number(h.box2_noDisc)||0) + (Number(h.box2_disc)||0);
-      b4 += (Number(h.box4_noDisc)||0) + (Number(h.box4_disc)||0);
+      b2 += (Number(h.box2_noDisc)||0)+(Number(h.box2_disc)||0);
+      b4 += (Number(h.box4_noDisc)||0)+(Number(h.box4_disc)||0);
     }
   }
   const total=b2+b4; if(!total) return { b2:0, b4:0 };
-  return { b2: (b2*100)/total, b4: (b4*100)/total };
+  return { b2:(b2*100)/total, b4:(b4*100)/total };
 }
 export function avgColor(scores){
   if (!scores || !scores.length) return "#6b7280";
