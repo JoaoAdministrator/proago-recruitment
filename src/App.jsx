@@ -1,15 +1,14 @@
-// App.jsx
-// Proago CRM — modular build (v2025-08-28 • Chat 10 updates)
-// - Re-added Login (two accounts) with logo/name
-// - Default tab = Inflow (not Planning)
-// - Wages tab renamed to "Pay" (component file kept as Wages.jsx)
-// - Header/Badge no-wrap fixes to keep text on one line
+// App.jsx — Proago CRM (v2025-08-29)
+// Updates in this version:
+// • Header: Logout moved to the right, next to Settings
+// • Rank display uses acronyms (RK, PR, PC, TC, SM, BM) everywhere
+// • Project label switched from "HF" to "Hello Fresh"
+// • Wages tab label still “Pay”
+// • Plumbs Settings with onClearPlanningHistory
 
 import React, { useEffect, useState } from "react";
 import { Button } from "./components/ui/button";
 import { Badge } from "./components/ui/badge";
-
-// Shared helpers + storage keys
 import {
   load, save, K, DEFAULT_SETTINGS,
   weekNumberISO, startOfWeekMon, titleCase
@@ -19,13 +18,10 @@ import {
 import Inflow from "./pages/Inflow";
 import Recruiters from "./pages/Recruiters";
 import Planning from "./pages/Planning";
-import Wages from "./pages/Wages";     // shows "Pay" now
+import Wages from "./pages/Wages";
 import Finances from "./pages/Finances";
 import Settings from "./pages/Settings";
 
-/* ──────────────────────────────────────────────────────────────────────────
-  Login
-────────────────────────────────────────────────────────────────────────── */
 const LOGIN_KEY = "proago_login_v1";
 const VALID_USERS = [
   { user: "Oscar", pass: "Sergio R4mos" },
@@ -69,13 +65,11 @@ const Login = ({ onOk }) => {
   );
 };
 
-/* ──────────────────────────────────────────────────────────────────────────
-  Shell (top nav + page container)
-────────────────────────────────────────────────────────────────────────── */
-const Shell = ({ tab, setTab, children, weekBadge }) => (
+const Shell = ({ tab, setTab, children, weekBadge, onLogout }) => (
   <div className="min-h-screen">
     <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
       <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
+        {/* Left: Brand */}
         <div className="flex items-center gap-3">
           <img
             src="/proago-icon.png"
@@ -89,12 +83,13 @@ const Shell = ({ tab, setTab, children, weekBadge }) => (
           {weekBadge && <Badge variant="secondary" className="ml-3 whitespace-nowrap">{weekBadge}</Badge>}
         </div>
 
-        <nav className="flex gap-2 justify-center w-full">
+        {/* Middle: Nav */}
+        <nav className="flex gap-2 justify-center">
           {[
             ["inflow", "Inflow"],
             ["recruiters", "Recruiters"],
             ["planning", "Planning"],
-            ["wages", "Pay"],        // label changed
+            ["wages", "Pay"],
             ["finances", "Finances"],
             ["settings", "Settings"],
           ].map(([key, label]) => (
@@ -112,6 +107,18 @@ const Shell = ({ tab, setTab, children, weekBadge }) => (
             </Button>
           ))}
         </nav>
+
+        {/* Right: Settings + Logout */}
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={() => setTab("settings")}
+            className="px-3"
+            style={tab === "settings" ? { background: "#d9010b", color: "white" } : { background: "#fca11c", color: "black" }}
+          >
+            Settings
+          </Button>
+          <Button variant="outline" onClick={onLogout}>Logout</Button>
+        </div>
       </div>
     </header>
 
@@ -119,25 +126,19 @@ const Shell = ({ tab, setTab, children, weekBadge }) => (
   </div>
 );
 
-/* ──────────────────────────────────────────────────────────────────────────
-  App
-────────────────────────────────────────────────────────────────────────── */
 export default function App() {
   const [session, setSession] = useState(() => {
     try { return JSON.parse(localStorage.getItem(LOGIN_KEY)) || null; } catch { return null; }
   });
 
-  // Tabs (default: Inflow)
   const [tab, setTab] = useState("inflow");
 
-  // Global state (persisted)
   const [settings, setSettings]     = useState(load(K.settings,   DEFAULT_SETTINGS));
   const [pipeline, setPipeline]     = useState(load(K.pipeline,   { leads: [], interview: [], formation: [] }));
   const [recruiters, setRecruiters] = useState(load(K.recruiters, []));
   const [planning, setPlanning]     = useState(load(K.planning,   {}));
   const [history, setHistory]       = useState(load(K.history,    []));
 
-  // Persist everything
   useEffect(() => save(K.settings, settings),     [settings]);
   useEffect(() => save(K.pipeline, pipeline),     [pipeline]);
   useEffect(() => save(K.recruiters, recruiters), [recruiters]);
@@ -146,13 +147,12 @@ export default function App() {
 
   const onLogout = () => { localStorage.removeItem(LOGIN_KEY); setSession(null); };
 
-  // Hire from Formation → Recruiters (keep underlying fields, display words change elsewhere)
   const onHire = (lead) => {
     const id = crypto.randomUUID ? crypto.randomUUID() : `r_${Date.now()}`;
     const rec = {
       id,
       name: titleCase(lead.name || ""),
-      role: "Rookie",            // underlying key kept; displayed as "Rank"
+      role: lead.role || "Rookie",
       crewCode: lead.crewCode || "",
       phone: lead.phone || "",
       email: lead.email || "",
@@ -167,11 +167,7 @@ export default function App() {
   if (!session) return <Login onOk={setSession} />;
 
   return (
-    <Shell tab={tab} setTab={setTab} weekBadge={badge}>
-      <div className="flex justify-end -mt-4 mb-4">
-        <Button variant="outline" onClick={onLogout}>Logout</Button>
-      </div>
-
+    <Shell tab={tab} setTab={setTab} weekBadge={badge} onLogout={onLogout}>
       {tab === "inflow" && (
         <Inflow
           pipeline={pipeline}
@@ -204,7 +200,11 @@ export default function App() {
       {tab === "finances" && <Finances history={history} />}
 
       {tab === "settings" && (
-        <Settings settings={settings} setSettings={setSettings} />
+        <Settings
+          settings={settings}
+          setSettings={setSettings}
+          onClearPlanningHistory={() => setHistory([])}
+        />
       )}
     </Shell>
   );
