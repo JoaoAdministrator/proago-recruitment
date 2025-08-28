@@ -1,157 +1,191 @@
-// util.js — Shared helpers for Proago CRM (v2025-08-28 sync)
+// util.js — Proago CRM (Final Sync Build v2025-08-28b)
+//
+// • Brand colors
+// • LocalStorage helpers (load/save)
+// • Global Keys (K)
+// • Default Settings (conversion matrix + rate bands)
+// • Dates (full month names, UK formatting, ISO week, start Monday, month key)
+// • Money helpers
+// • Input helpers to prevent the one-letter typing bug
+// • Phone prefixes
+// • Shared modal/workbench size for large dialogs
 
-export const BRAND = { primary: "#d9010b", secondary: "#eb2a2a", accent: "#fca11c" };
+/* -------------------- Brand -------------------- */
+export const BRAND = {
+  primary: "#d9010b",
+  secondary: "#eb2a2a",
+  accent: "#fca11c",
+};
 
-// ───────────────── Storage ─────────────────
-export const load = (k, fallback) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; } catch { return fallback; } };
-export const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
-
+/* -------------------- Storage -------------------- */
 export const K = {
-  recruiters: "proago_recruiters_v8_rank",
-  pipeline:   "proago_pipeline_v7",
-  history:    "proago_history_v7_discounts",
-  planning:   "proago_planning_v6",
-  settings:   "proago_settings_v4_bands_projects",
-  auth:       "proago_auth_v1",
+  auth: "proago.auth",
+  leads: "proago.leads",
+  recruiters: "proago.recruiters",
+  planning: "proago.planning",
+  history: "proago.history",
+  payouts: "proago.payouts",
+  settings: "proago.settings",
 };
 
-// ─────────────── Clone ───────────────
-export const clone = typeof structuredClone === "function" ? structuredClone : (obj) => JSON.parse(JSON.stringify(obj));
+export function load(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
-// ─────────────── Dates (UTC) ───────────────
-export const fmtISO = (d) => new Date(Date.UTC(
-  d.getUTCFullYear?.() ?? d.getFullYear(),
-  d.getUTCMonth?.() ?? d.getMonth(),
-  d.getUTCDate?.() ?? d.getDate()
-)).toISOString().slice(0,10);
+export function save(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore quota/serialization errors
+  }
+}
 
-export const addDays = (date, n) => { const d = new Date(date); d.setUTCDate(d.getUTCDate() + n); return d; };
-
-export const startOfWeekMon = (date = new Date()) => {
-  const d = new Date(Date.UTC(
-    date.getUTCFullYear?.() ?? date.getFullYear(),
-    date.getUTCMonth?.() ?? date.getMonth(),
-    date.getUTCDate?.() ?? date.getDate()
-  ));
-  const day = (d.getUTCDay() + 6) % 7; // Mon=0
-  d.setUTCDate(d.getUTCDate() - day); d.setUTCHours(0,0,0,0); return d;
+/* -------------------- Defaults / Settings -------------------- */
+// Conversion prices (Income) for D2D/Event and discount/no-discount.
+// Adjust freely in Settings page; these are safe fallbacks.
+export const DEFAULT_SETTINGS = {
+  hourlyRateBands: [
+    { effectiveFrom: "2025-01-01", rate: 15 },
+  ],
+  conversionType: {
+    D2D: {
+      noDiscount: { box2: 120, box4: 240 },
+      discount:   { box2: 90,  box4: 180 },
+    },
+    EVENT: {
+      noDiscount: { box2: 140, box4: 260 },
+      discount:   { box2: 100, box4: 200 },
+    },
+  },
 };
 
-export const weekNumberISO = (date) => {
-  const d = new Date(Date.UTC(
-    date.getUTCFullYear?.() ?? date.getFullYear(),
-    date.getUTCMonth?.() ?? date.getMonth(),
-    date.getUTCDate?.() ?? date.getDate()
-  ));
-  d.setUTCHours(0,0,0,0);
-  d.setUTCDate(d.getUTCDate() + 3 - ((d.getUTCDay() + 6) % 7));
-  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
-  firstThursday.setUTCDate(firstThursday.getUTCDate() + 3 - ((firstThursday.getUTCDay() + 6) % 7));
-  return 1 + Math.round(((d - firstThursday) / 86400000) / 7);
-};
+// Get hourly rate effective at a given ISO date (YYYY-MM-DD)
+export function rateForDate(settings, dateISO) {
+  const bands = (settings?.hourlyRateBands || DEFAULT_SETTINGS.hourlyRateBands).slice().sort(
+    (a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom)
+  );
+  const d = dateISO || new Date().toISOString().slice(0, 10);
+  let picked = bands[0]?.rate ?? 15;
+  for (const b of bands) {
+    if (d >= b.effectiveFrom) picked = b.rate;
+  }
+  return Number(picked || 0);
+}
 
-export const fmtUK = (iso) => { if (!iso) return ""; const [y,m,d] = iso.split("-"); return `${d}/${m}/${String(y).slice(2)}`; };
-export const monthKey = (iso) => (iso || "").slice(0,7);
-export const monthLabelShort = (ym) => {
-  const [y,m] = ym.split("-").map(Number);
-  return new Date(Date.UTC(y, m-1, 1)).toLocaleDateString(undefined, { month:"short", year:"numeric", timeZone:"UTC" });
-};
-export const monthLabelFull = (ym) => {
-  const [y,m] = ym.split("-").map(Number);
-  return new Date(Date.UTC(y, m-1, 1)).toLocaleDateString(undefined, { month:"long", year:"numeric", timeZone:"UTC" });
-};
+/* -------------------- Date Helpers -------------------- */
+// UK-style day-first string (26/08/2025)
+export function fmtUK(isoOrDate) {
+  const d = typeof isoOrDate === "string" ? new Date(isoOrDate) : new Date(isoOrDate);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
 
-// ───────────── Money / visuals ─────────────
-export const toMoney = (n) => (Number(n || 0)).toFixed(2);
-export const avgColor = (v) => (Number(v) >= 3 ? "#10b981" : Number(v) >= 2 ? "#fbbf24" : "#ef4444");
+// Full month label, e.g., "August 2025"
+export function monthFull(isoYearMonth) {
+  // accepts "YYYY-MM" or any date-like ISO
+  let y = 0, m = 0;
+  if (/^\d{4}-\d{2}$/.test(isoYearMonth)) {
+    y = Number(isoYearMonth.slice(0, 4));
+    m = Number(isoYearMonth.slice(5, 7));
+  } else {
+    const d = new Date(isoYearMonth);
+    y = d.getUTCFullYear();
+    m = d.getUTCMonth() + 1;
+  }
+  const dt = new Date(Date.UTC(y, m - 1, 1));
+  return dt.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+}
 
-// ───────────── Names / phones ─────────────
-export const titleCase = (s="") => s.trim().toLowerCase().replace(/\s+/g," ").split(" ").map(w => (w? w[0].toUpperCase()+w.slice(1):"")).join(" ");
-export const titleCaseFirstOnBlur = (v) => (typeof v==="string" && v ? v.charAt(0).toUpperCase()+v.slice(1) : v);
+// Monday as the first day of the week
+export function startOfWeekMon(dateObj) {
+  const d = new Date(dateObj);
+  const day = (d.getDay() + 6) % 7; // 0 => Monday
+  const res = new Date(d);
+  res.setDate(d.getDate() - day);
+  res.setHours(0, 0, 0, 0);
+  return res;
+}
 
-// onChange passthrough (no formatting while typing)
-export const passthrough = (setter) => (eOrVal) => {
-  const v = eOrVal?.target ? eOrVal.target.value : eOrVal;
+// ISO week number (1–53)
+export function weekNumberISO(dateObj) {
+  const d = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
+  // Thursday in current week decides the year.
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  return weekNo;
+}
+
+// Month key "YYYY-MM" from ISO date
+export function monthKey(isoDate) {
+  if (!isoDate) return "";
+  return `${isoDate.slice(0, 7)}`;
+}
+
+// ISO string (YYYY-MM-DD) normalized to midnight local
+export function fmtISO(dateObj) {
+  const d = new Date(dateObj);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString().slice(0, 10);
+}
+
+/* -------------------- Money -------------------- */
+export function toMoney(n) {
+  const x = Number(n || 0);
+  return x.toFixed(2);
+}
+
+/* -------------------- Input Helpers (fix one-letter bug) -------------------- */
+// Use these to avoid formatting while typing. Only format/clean onBlur.
+
+export const passthrough = (setter) => (eOrValue) => {
+  // supports (event) or (value) style
+  const v = eOrValue?.target ? eOrValue.target.value : eOrValue;
   setter(v);
 };
-// onBlur format wrapper
-export const onBlurFormat = (getter, setter, fmt) => () => setter(fmt(getter()));
+
+export const titleCaseFirstOnBlur = (value) => {
+  if (typeof value !== "string" || !value) return value ?? "";
+  return value.charAt(0).toUpperCase() + value.slice(1);
+};
 
 export const normalizeNumericOnBlur = (value) => {
   if (value == null) return "";
-  const cleaned = String(value).replace(/[^\d.]/g, "");
+  const s = String(value);
+  const cleaned = s.replace(/[^\d.]/g, "");
   const parts = cleaned.split(".");
-  return parts.length > 1 ? `${parts[0]}.${parts.slice(1).join("").replace(/\./g,"")}` : cleaned;
+  return parts.length > 1 ? `${parts[0]}.${parts.slice(1).join("").replace(/\./g, "")}` : cleaned;
 };
 
-// Phone prefixes / formatting
-export const PHONE_PREFIXES = ["+352","+33","+32","+49"];
-const FLAG_BY_CC = { "+352":"🇱🇺", "+33":"🇫🇷", "+32":"🇧🇪", "+49":"🇩🇪" };
+export const emailOnChange = passthrough;
 
-export const formatPhoneByCountry = (cc, digits) => {
-  const clean = String(digits||"").replace(/[^\d]/g,"");
-  let rest = clean;
-  if (cc === "+352") rest = rest.replace(/(\d{3})(?=\d)/g,"$1 ").trim();
-  else if (cc === "+33" || cc === "+32") rest = rest.replace(/(\d{2})(?=\d)/g,"$1 ").trim();
-  else if (cc === "+49") rest = rest.replace(/(\d{3})(?=\d)/g,"$1 ").trim();
-  return { display: `${cc} ${rest}`.trim(), ok: !!clean, flag: FLAG_BY_CC[cc] || "" };
+// Generic onBlur formatter wrapper when using local state getters/setters
+export const onBlurFormat = (getter, setter, formatter) => () => {
+  setter(formatter(getter()));
 };
 
-// ───────────── Settings (conversion matrix + bands) ─────────────
-export const DEFAULT_SETTINGS = {
-  projects: ["HF"],
-  conversionType: {
-    D2D: { noDiscount: { box2: 95, box4: 125 }, discount: { box2: 80, box4: 110 } },
-    EVENT:{ noDiscount: { box2: 60, box4: 70  }, discount: { box2: 45, box4: 55  } },
-  },
-  rateBands: [
-    { startISO: "1900-01-01", rate: 15.2473 },
-    { startISO: "2025-05-01", rate: 15.6265 },
-  ],
-};
-
-export const rateForDate = (settings, iso) => {
-  const bands = [...(settings?.rateBands || [])].sort((a,b)=> a.startISO < b.startISO ? 1 : -1);
-  const d = iso || fmtISO(new Date());
-  const band = bands.find(b => b.startISO <= d) || bands[bands.length-1] || { rate: DEFAULT_SETTINGS.rateBands[0].rate };
-  return band.rate;
-};
-
-// ───────────── Performance helpers ─────────────
-export const isWithinLastWeeks = (iso, weeks = 8) => {
-  const [y,m,d] = iso.split("-").map(Number);
-  const row = new Date(Date.UTC(y, m-1, d));
-  const today = startOfWeekMon(new Date());
-  const diffDays = (today - row) / 86400000;
-  return diffDays >= 0 && diffDays <= weeks * 7;
-};
-
-export const boxTotals = (row) => {
-  const b2 = (Number(row.box2_noDisc)||0) + (Number(row.box2_disc)||0);
-  const b4 = (Number(row.box4_noDisc)||0) + (Number(row.box4_disc)||0);
-  return { b2, b4 };
-};
-
-export const last5ScoresFor = (history, recruiterId) =>
-  history.filter(h => h.recruiterId === recruiterId && typeof h.score === "number")
-         .sort((a,b)=> (a.dateISO < b.dateISO ? 1 : -1))
-         .slice(0,5)
-         .map(h => Number(h.score) || 0);
-
-// ───────────── Role/Rank defaults ─────────────
-export const roleHoursDefault = (rank) =>
-  rank === "Pool Captain" ? 7 : (rank === "Team Captain" || rank === "Sales Manager") ? 8 : 6;
-
-export const roleMultiplierDefault = (rank) =>
-  rank === "Pool Captain" ? 1.25 : rank === "Team Captain" ? 1.5 : rank === "Sales Manager" ? 2.0 : 1.0;
-
-// ───────────── Modal sizing (Recruiter Info + Edit Day) ─────────────
-export const MODAL_SIZES = {
-  workbench: { className: "w-[92vw] max-w-[1200px] h-[82vh]", contentClass: "h-full overflow-auto" },
-};
-
-// ───────────── Auth users ─────────────
-export const USERS = [
-  { u: "Oscar", p: "Sergio R4mos" },
-  { u: "Joao",  p: "Ruben Di4s"  },
+/* -------------------- Phone Prefixes -------------------- */
+// For Mobile prefix dropdowns in Inflow
+export const PHONE_PREFIXES = [
+  { label: "+352 (LU)", value: "+352" },
+  { label: "+33 (FR)",  value: "+33"  },
+  { label: "+32 (BE)",  value: "+32"  },
+  { label: "+49 (DE)",  value: "+49"  },
+  { label: "+41 (CH)",  value: "+41"  },
 ];
+
+/* -------------------- Shared Modal Size -------------------- */
+// Use the same large "workbench" surface for Edit Day & Recruiter Info
+export const MODAL_SIZES = {
+  workbench: {
+    className: "w-[92vw] max-w-[1200px] h-[82vh]",
+    contentClass: "h-full overflow-auto",
+  },
+};
