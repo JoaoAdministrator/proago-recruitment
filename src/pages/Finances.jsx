@@ -1,19 +1,30 @@
-// Finances.jsx — (Chat 9 base + requested changes only)
-//
-// Changes:
+// Finances.jsx — Chat 9 baseline + requested tweaks only
 // • Full month names
-// • Year dropdown contains Months → Weeks drill-down (aligned columns)
-// • Recruiter rows: removed Project Type & Location per your ask; show Shifts
-// • Box2/Box4 split: No Discount / Discount
+// • Recruiter breakdown: add Shifts column; remove Project Type & Location
+// • Box2/Box4: No Discount / Discount columns
 // • Profit = Income − (Wages + Bonus)
-// • Wording uses Rank (was Role)
+// • Keep alignment across Year → Month → Week → Day → Recruiter
 
 import React, { useMemo, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
-import { load, K, DEFAULT_SETTINGS, rateForDate, fmtISO, fmtUK, startOfWeekMon, weekNumberISO, monthKey, monthFull, toMoney } from "../util";
+import { load, K, fmtISO, fmtUK, startOfWeekMon, weekNumberISO, monthKey, monthFull, toMoney } from "../util";
 
-const profitColor = (v)=> (v>0 ? "#10b981" : v<0 ? "#ef4444" : undefined);
+const DEFAULT_SETTINGS = load(K.settings, null) || {
+  hourlyRateBands: [{ effectiveFrom: "2025-01-01", rate: 15 }],
+  conversionType: {
+    D2D:   { noDiscount: { box2:120, box4:240 }, discount:{ box2:90, box4:180 } },
+    EVENT: { noDiscount: { box2:140, box4:260 }, discount:{ box2:100, box4:200 } },
+  },
+};
+
+const rateForDate = (dateISO)=>{
+  const bands = (DEFAULT_SETTINGS.hourlyRateBands||[]).slice().sort((a,b)=>a.effectiveFrom.localeCompare(b.effectiveFrom));
+  const d = dateISO || new Date().toISOString().slice(0,10);
+  let picked = bands[0]?.rate ?? 15;
+  for (const b of bands) if (d >= b.effectiveFrom) picked = b.rate;
+  return Number(picked||0);
+};
 const rookieCommission = (box2)=>{ const t={0:0,1:0,2:25,3:40,4:70,5:85,6:120,7:135,8:175,9:190,10:235}; return box2<=10 ? (t[box2]??0) : 235 + (box2-10)*15; };
 const defaultHoursByRank = (rank)=> rank==="Sales Manager"?8 : rank==="Team Captain"?8 : rank==="Pool Captain"?7 : 6;
 const multiplierByRank   = (rank)=> rank==="Sales Manager"?2.0:rank==="Team Captain"?1.5:rank==="Pool Captain"?1.25:1.0;
@@ -23,8 +34,6 @@ export default function Finances({ history }) {
   const [openMonth, setOpenMonth] = useState({});
   const [openWeek, setOpenWeek] = useState({});
   const [openDay, setOpenDay] = useState({});
-  const settings = load(K.settings, DEFAULT_SETTINGS);
-  const matrix = settings.conversionType || DEFAULT_SETTINGS.conversionType;
 
   const rowsYear = useMemo(()=>{
     const start=`${year}-01-01`, end=`${year}-12-31`;
@@ -38,19 +47,21 @@ export default function Finances({ history }) {
     const out={}; rowsYear.forEach(r=>{ const ym=monthKey(r.dateISO||r.date); (out[ym] ||= []).push(r); }); return out;
   }, [rowsYear]);
 
+  const matrix = DEFAULT_SETTINGS.conversionType;
+
   const calcIncome = (row)=>{
     const type = row.shiftType==="EVENT" ? "EVENT" : "D2D";
     const m = matrix[type] || matrix.D2D;
     const b2n=+row.box2_noDisc||0, b2d=+row.box2_disc||0, b4n=+row.box4_noDisc||0, b4d=+row.box4_disc||0;
     return b2n*(m.noDiscount?.box2||0) + b2d*(m.discount?.box2||0) + b4n*(m.noDiscount?.box4||0) + b4d*(m.discount?.box4||0);
   };
-  const calcWages = (row)=>{ const hrs=(row.hours!==""&&row.hours!=null) ? +row.hours : defaultHoursByRank(row.roleAtShift||"Rookie"); const rate=rateForDate(settings,row.dateISO); return hrs*rate; };
-  const calcBonus = (row, roleAtShift)=>{ const box2=(+row.box2_noDisc||0)+(+row.box2_disc||0); const mult=(row.commissionMult!==""&&row.commissionMult!=null)?+row.commissionMult:multiplierByRank(roleAtShift); return rookieCommission(box2)*mult; };
+  const calcWages = (row)=>{ const hrs=(row.hours!==""&&row.hours!=null) ? +row.hours : defaultHoursByRank(row.roleAtShift||"Rookie"); const rate=rateForDate(row.dateISO); return hrs*rate; };
+  const calcBonus = (row)=>{ const box2=(+row.box2_noDisc||0)+(+row.box2_disc||0); const mult=(row.commissionMult!==""&&row.commissionMult!=null)?+row.commissionMult:multiplierByRank(row.roleAtShift); return rookieCommission(box2)*mult; };
 
   const summarizeRows = (rows)=>{
     let shifts=0, score=0, box2=0, box4=0, wages=0, income=0, bonus=0;
     const detail=rows.map((r,i)=>{
-      const inc=calcIncome(r), wag=calcWages(r), bon=calcBonus(r, r.roleAtShift);
+      const inc=calcIncome(r), wag=calcWages(r), bon=calcBonus(r);
       const b2=(+r.box2_noDisc||0)+(+r.box2_disc||0), b4=(+r.box4_noDisc||0)+(+r.box4_disc||0);
       const sc=+r.score||0, prof=inc-(wag+bon);
       return {...r, score:sc, income:inc, wages:wag, bonus:bon, profit:prof, b2, b4, _k:r._rowKey??i};
@@ -71,14 +82,14 @@ export default function Finances({ history }) {
           </select>
         </div>
         <div className="text-sm text-muted-foreground">
-          Shifts {yearTotals.shifts} • Score {yearTotals.score} • Box2 {yearTotals.box2} • Box4 {yearTotals.box4} • Wages €{toMoney(yearTotals.wages)} • Income €{toMoney(yearTotals.income)} • <span style={{color:profitColor(yearTotals.profit)}}>Profit €{toMoney(yearTotals.profit)}</span>
+          Shifts {yearTotals.shifts} • Score {yearTotals.score} • Box2 {yearTotals.box2} • Box4 {yearTotals.box4} • Wages €{toMoney(yearTotals.wages)} • Income €{toMoney(yearTotals.income)} • <span style={{color: yearTotals.profit>0?"#10b981":yearTotals.profit<0?"#ef4444":undefined}}>Profit €{toMoney(yearTotals.profit)}</span>
         </div>
       </div>
 
       {Object.keys(byMonth).sort().map(ym=>{
         const monthRows = byMonth[ym];
         const byWeek = {};
-        monthRows.forEach(r=>{ const wk = fmtISO(startOfWeekMon(new Date(r.dateISO||r.date))); (byWeek[wk] ||= []).push(r); });
+        monthRows.forEach(r=>{ const wk=fmtISO(startOfWeekMon(new Date(r.dateISO||r.date))); (byWeek[wk] ||= []).push(r); });
         const monthSum = summarizeRows(monthRows);
 
         return (
@@ -92,10 +103,8 @@ export default function Finances({ history }) {
                 <div className="text-sm">Box4 {monthSum.box4}</div>
                 <div className="text-sm">Wages €{toMoney(monthSum.wages)}</div>
                 <div className="text-sm">Income €{toMoney(monthSum.income)}</div>
-                <div className="text-sm" style={{color:profitColor(monthSum.profit)}}>Profit €{toMoney(monthSum.profit)}</div>
-                <Button size="sm" variant="outline" onClick={()=>setOpenMonth(s=>({...s,[ym]:!s[ym]}))}>
-                  {openMonth[ym] ? "Hide" : "Expand"}
-                </Button>
+                <div className="text-sm" style={{color: monthSum.profit>0?"#10b981":monthSum.profit<0?"#ef4444":undefined}}>Profit €{toMoney(monthSum.profit)}</div>
+                <Button size="sm" variant="outline" onClick={()=>setOpenMonth(s=>({...s,[ym]:!s[ym]}))}>{openMonth[ym]?"Hide":"Expand"}</Button>
               </div>
             </div>
 
@@ -120,7 +129,6 @@ export default function Finances({ history }) {
                       {Object.keys(byWeek).sort().map(wk=>{
                         const wkRows=byWeek[wk], byDay={}; wkRows.forEach(r=>{ (byDay[r.dateISO||r.date] ||= []).push(r); });
                         const wkSum = summarizeRows(wkRows);
-
                         return (
                           <React.Fragment key={wk}>
                             <tr className="border-t">
@@ -131,7 +139,7 @@ export default function Finances({ history }) {
                               <td className="p-2 text-right">{wkSum.box4}</td>
                               <td className="p-2 text-right">{toMoney(wkSum.wages)}</td>
                               <td className="p-2 text-right">{toMoney(wkSum.income)}</td>
-                              <td className="p-2 text-right" style={{color:profitColor(wkSum.profit)}}>{toMoney(wkSum.profit)}</td>
+                              <td className="p-2 text-right" style={{color: wkSum.profit>0?"#10b981":wkSum.profit<0?"#ef4444":undefined}}>{toMoney(wkSum.profit)}</td>
                               <td className="p-2 text-right"><Button size="sm" variant="outline" onClick={()=>setOpenWeek(s=>({...s,[wk]:!s[wk]}))}>{openWeek[wk]?"Hide":"View"}</Button></td>
                             </tr>
 
@@ -167,7 +175,7 @@ export default function Finances({ history }) {
                                                   <td className="p-2 text-right">{dSum.box4}</td>
                                                   <td className="p-2 text-right">{toMoney(dSum.wages)}</td>
                                                   <td className="p-2 text-right">{toMoney(dSum.income)}</td>
-                                                  <td className="p-2 text-right" style={{color:profitColor(dSum.profit)}}>{toMoney(dSum.profit)}</td>
+                                                  <td className="p-2 text-right" style={{color: dSum.profit>0?"#10b981":dSum.profit<0?"#ef4444":undefined}}>{toMoney(dSum.profit)}</td>
                                                   <td className="p-2 text-right">
                                                     <Button size="sm" variant="outline" onClick={()=>setOpenDay(s=>({...s,[dk]:!s[dk]}))}>{openDay[dk]?"Hide":"Details"}</Button>
                                                   </td>
@@ -177,7 +185,6 @@ export default function Finances({ history }) {
                                                   <tr>
                                                     <td colSpan={9} className="p-0">
                                                       <div className="px-2 pb-3">
-                                                        {/* Recruiter breakdown — removed project type & location per ask; added Shifts */}
                                                         <div className="overflow-x-auto border rounded-lg">
                                                           <table className="min-w-full text-sm">
                                                             <thead className="bg-zinc-50">
@@ -207,8 +214,8 @@ export default function Finances({ history }) {
                                                                   <td className="p-2 text-right">{Number(r.box4_disc)||0}</td>
                                                                   <td className="p-2 text-right">{toMoney(calcWages(r))}</td>
                                                                   <td className="p-2 text-right">{toMoney(calcIncome(r))}</td>
-                                                                  <td className="p-2 text-right">{toMoney(calcBonus(r, r.roleAtShift))}</td>
-                                                                  <td className="p-2 text-right" style={{color:profitColor(r.profit)}}>{toMoney(r.profit)}</td>
+                                                                  <td className="p-2 text-right">{toMoney(calcBonus(r))}</td>
+                                                                  <td className="p-2 text-right" style={{color:r.profit>0?"#10b981":r.profit<0?"#ef4444":undefined}}>{toMoney(r.profit)}</td>
                                                                 </tr>
                                                               ))}
                                                             </tbody>
