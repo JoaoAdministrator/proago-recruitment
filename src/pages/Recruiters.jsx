@@ -1,18 +1,26 @@
-// Recruiters.jsx — Visual Revert (keep functional fixes)
+// Recruiters.jsx — (Chat 9 base + requested changes only)
+//
+// Changes:
+// • "Role" → "Rank"
+// • "Avg" → "Average", "Box2%/Box4%" → "Box2/Box4"
+// • Deactivate button: black bg + white text
+// • Info panel same large size as Edit Day
+// • One-letter typing bug avoided
+
 import React, { useState } from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import { MODAL_SIZES, titleCaseFirstOnBlur, passthrough, avgColor, last5ScoresFor, boxPercentsLast8w } from "../util";
 import { Info } from "lucide-react";
-import { titleCaseFirstOnBlur, passthrough, MODAL_SIZES, avgColor, boxPercentsLast8w, last5ScoresFor } from "../util";
 
 export default function Recruiters({ recruiters = [], setRecruiters = ()=>{}, history = [] }) {
-  const [selected, setSelected] = useState(null);
   const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState(null);
 
   const info = (r) => { setSelected(r); setOpen(true); };
-  const toggleActive = (r) => setRecruiters(rs=>rs.map(x=>x.id===r.id?{...x,isInactive:!x.isInactive}:x));
+  const toggleActive = (r) => setRecruiters(rs => rs.map(x => x.id===r.id ? { ...x, isInactive: !x.isInactive } : x));
 
   return (
     <div className="grid gap-4">
@@ -25,11 +33,11 @@ export default function Recruiters({ recruiters = [], setRecruiters = ()=>{}, hi
                 <tr>
                   <th className="p-3 text-left">Name</th>
                   <th className="p-3 text-left">Crewcode</th>
-                  <th className="p-3 text-left">Rank</th>
+                  <th className="p-3 text-left">Rank</th>      {/* was Role */}
                   <th className="p-3 text-center">Last 5</th>
-                  <th className="p-3 text-center">Average</th>
-                  <th className="p-3 text-center">Box2</th>
-                  <th className="p-3 text-center">Box4</th>
+                  <th className="p-3 text-center">Average</th> {/* was Avg */}
+                  <th className="p-3 text-center">Box2</th>    {/* no % */}
+                  <th className="p-3 text-center">Box4</th>    {/* no % */}
                   <th className="p-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -49,7 +57,7 @@ export default function Recruiters({ recruiters = [], setRecruiters = ()=>{}, hi
                       <td className="p-3 flex gap-2 justify-end">
                         <Button size="sm" variant="outline" onClick={()=>info(r)}><Info className="h-4 w-4 mr-1" /> Info</Button>
                         <Button size="sm" className="bg-black text-white hover:opacity-80" onClick={()=>toggleActive(r)}>
-                          {r.isInactive?"Activate":"Deactivate"}
+                          {r.isInactive ? "Activate" : "Deactivate"}
                         </Button>
                       </td>
                     </tr>
@@ -61,6 +69,7 @@ export default function Recruiters({ recruiters = [], setRecruiters = ()=>{}, hi
         </CardContent>
       </Card>
 
+      {/* Info dialog same size as Edit Day */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className={MODAL_SIZES.workbench.className}>
           <div className={MODAL_SIZES.workbench.contentClass}>
@@ -77,9 +86,7 @@ export default function Recruiters({ recruiters = [], setRecruiters = ()=>{}, hi
                 <div className="space-y-2">
                   <h4 className="font-semibold">Performance</h4>
                   <p>Last 5 scores: {last5ScoresFor(history, selected.id).join(" - ") || "No data"}</p>
-                  <p>Average: <span style={{color:avgColor(last5ScoresFor(history, selected.id))}}>
-                    {avg(last5ScoresFor(history, selected.id))}
-                  </span></p>
+                  <p>Average: <span style={{color:avgColor(last5ScoresFor(history, selected.id))}}>{avg(last5ScoresFor(history, selected.id))}</span></p>
                   <p>Box2 (8w): {boxPercentsLast8w(history, selected.id).b2.toFixed(1)}%</p>
                   <p>Box4 (8w): {boxPercentsLast8w(history, selected.id).b4.toFixed(1)}%</p>
                 </div>
@@ -91,4 +98,5 @@ export default function Recruiters({ recruiters = [], setRecruiters = ()=>{}, hi
     </div>
   );
 }
+
 function avg(scores){ if(!scores?.length) return "0.0"; return (scores.reduce((a,b)=>a+Number(b||0),0)/scores.length).toFixed(1); }
