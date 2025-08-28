@@ -1,6 +1,9 @@
-// Settings.jsx
-// Proago CRM — Settings (v2025-08-28, Chat 9)
-// Projects • Conversion Matrix • Hourly Rate Bands
+// Settings.jsx — Proago CRM (Final Sync Build v2025-08-28h)
+// - Projects list editable
+// - Conversion matrix editable (D2D + Events, Discount/No Discount, Box2/Box4)
+// - Hourly rate bands editable (date + rate)
+// - Safe typing (no one-letter bug)
+// - Save / Reset to defaults
 
 import React, { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
@@ -8,14 +11,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Plus, X } from "lucide-react";
-import { DEFAULT_SETTINGS, save, K } from "../util";
+import { DEFAULT_SETTINGS, save, K, passthrough, normalizeNumericOnBlur } from "../util";
 
 export default function Settings({ settings, setSettings }) {
-  // Local working copy so typing doesn't flicker
+  // Local working copy (avoid flicker while typing)
   const [local, setLocal] = useState(settings || DEFAULT_SETTINGS);
 
   useEffect(() => setLocal(settings || DEFAULT_SETTINGS), [settings]);
 
+  /* -------------------- Projects -------------------- */
   const setProjectName = (idx, name) =>
     setLocal((s) => {
       const projects = [...(s.projects || [])];
@@ -29,6 +33,7 @@ export default function Settings({ settings, setSettings }) {
   const delProject = (idx) =>
     setLocal((s) => ({ ...s, projects: (s.projects || []).filter((_, i) => i !== idx) }));
 
+  /* -------------------- Conversion Matrix -------------------- */
   const setMatrix = (type, tier, field, val) =>
     setLocal((s) => ({
       ...s,
@@ -44,10 +49,14 @@ export default function Settings({ settings, setSettings }) {
       },
     }));
 
+  /* -------------------- Rate Bands -------------------- */
   const addBand = () =>
     setLocal((s) => ({
       ...s,
-      rateBands: [...(s.rateBands || []), { startISO: new Date().toISOString().slice(0, 10), rate: 16 }],
+      rateBands: [
+        ...(s.rateBands || []),
+        { startISO: new Date().toISOString().slice(0, 10), rate: 16 },
+      ],
     }));
 
   const setBand = (idx, patch) =>
@@ -60,6 +69,7 @@ export default function Settings({ settings, setSettings }) {
   const delBand = (idx) =>
     setLocal((s) => ({ ...s, rateBands: (s.rateBands || []).filter((_, i) => i !== idx) }));
 
+  /* -------------------- Actions -------------------- */
   const onSave = () => {
     setSettings(local);
     save(K.settings, local);
@@ -83,9 +93,7 @@ export default function Settings({ settings, setSettings }) {
 
       {/* Projects */}
       <Card>
-        <CardHeader>
-          <CardTitle>Projects</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Projects</CardTitle></CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
             {(local.projects || []).map((p, i) => (
@@ -111,9 +119,7 @@ export default function Settings({ settings, setSettings }) {
 
       {/* Conversion Matrix */}
       <Card>
-        <CardHeader>
-          <CardTitle>Conversion Matrix</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Conversion Matrix</CardTitle></CardHeader>
         <CardContent>
           {types.map((t) => (
             <div key={t.key} className="mb-4">
@@ -131,7 +137,12 @@ export default function Settings({ settings, setSettings }) {
                             local.conversionType?.[t.key]?.[tier.key]?.box2 ??
                             DEFAULT_SETTINGS.conversionType[t.key][tier.key].box2
                           }
-                          onChange={(e) => setMatrix(t.key, tier.key, "box2", e.target.value)}
+                          onChange={(e) =>
+                            setMatrix(t.key, tier.key, "box2", e.target.value)
+                          }
+                          onBlur={(e) =>
+                            setMatrix(t.key, tier.key, "box2", normalizeNumericOnBlur(e.target.value))
+                          }
                         />
                       </div>
                       <div>
@@ -142,7 +153,12 @@ export default function Settings({ settings, setSettings }) {
                             local.conversionType?.[t.key]?.[tier.key]?.box4 ??
                             DEFAULT_SETTINGS.conversionType[t.key][tier.key].box4
                           }
-                          onChange={(e) => setMatrix(t.key, tier.key, "box4", e.target.value)}
+                          onChange={(e) =>
+                            setMatrix(t.key, tier.key, "box4", e.target.value)
+                          }
+                          onBlur={(e) =>
+                            setMatrix(t.key, tier.key, "box4", normalizeNumericOnBlur(e.target.value))
+                          }
                         />
                       </div>
                     </div>
@@ -156,9 +172,7 @@ export default function Settings({ settings, setSettings }) {
 
       {/* Hourly Rate Bands */}
       <Card>
-        <CardHeader>
-          <CardTitle>Hourly Rate Bands</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Hourly Rate Bands</CardTitle></CardHeader>
         <CardContent>
           <div className="grid gap-2">
             {[...(local.rateBands || [])]
@@ -178,7 +192,8 @@ export default function Settings({ settings, setSettings }) {
                     <Input
                       inputMode="decimal"
                       value={band.rate}
-                      onChange={(e) => setBand(i, { rate: Number(e.target.value) || 0 })}
+                      onChange={(e) => setBand(i, { rate: e.target.value })}
+                      onBlur={(e) => setBand(i, { rate: normalizeNumericOnBlur(e.target.value) })}
                     />
                   </div>
                   <div className="flex gap-2">
@@ -199,9 +214,7 @@ export default function Settings({ settings, setSettings }) {
       </Card>
 
       <div className="flex justify-end gap-2">
-        <Button variant="outline" onClick={onReset}>
-          Reset
-        </Button>
+        <Button variant="outline" onClick={onReset}>Reset</Button>
         <Button style={{ background: "#d9010b", color: "white" }} onClick={onSave}>
           Save Settings
         </Button>
