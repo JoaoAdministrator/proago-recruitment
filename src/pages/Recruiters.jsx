@@ -1,26 +1,22 @@
-// Recruiters.jsx — (Chat 9 base + requested changes only)
-//
-// Changes:
-// • "Role" → "Rank"
-// • "Avg" → "Average", "Box2%/Box4%" → "Box2/Box4"
-// • Deactivate button: black bg + white text
-// • Info panel same large size as Edit Day
-// • One-letter typing bug avoided
+// Recruiters.jsx — Chat 9 baseline + labels/behavior only
+// • Role → Rank
+// • Avg → Average; Box2%/Box4% → Box2/Box4
+// • Deactivate button = black bg + white text
+// • Info dialog usable size (no redesign)
 
 import React, { useState } from "react";
+import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Input } from "../components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { MODAL_SIZES, titleCaseFirstOnBlur, passthrough, avgColor, last5ScoresFor, boxPercentsLast8w } from "../util";
+import { last5ScoresFor, boxPercentsLast8w, avgColor } from "../util";
 import { Info } from "lucide-react";
 
 export default function Recruiters({ recruiters = [], setRecruiters = ()=>{}, history = [] }) {
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState(null);
+  const [sel, setSel] = useState(null);
 
-  const info = (r) => { setSelected(r); setOpen(true); };
-  const toggleActive = (r) => setRecruiters(rs => rs.map(x => x.id===r.id ? { ...x, isInactive: !x.isInactive } : x));
+  const info = (r)=>{ setSel(r); setOpen(true); };
+  const toggleActive = (r)=> setRecruiters(rs=>rs.map(x=>x.id===r.id?{...x,isInactive:!x.isInactive}:x));
 
   return (
     <div className="grid gap-4">
@@ -33,11 +29,11 @@ export default function Recruiters({ recruiters = [], setRecruiters = ()=>{}, hi
                 <tr>
                   <th className="p-3 text-left">Name</th>
                   <th className="p-3 text-left">Crewcode</th>
-                  <th className="p-3 text-left">Rank</th>      {/* was Role */}
+                  <th className="p-3 text-left">Rank</th>
                   <th className="p-3 text-center">Last 5</th>
-                  <th className="p-3 text-center">Average</th> {/* was Avg */}
-                  <th className="p-3 text-center">Box2</th>    {/* no % */}
-                  <th className="p-3 text-center">Box4</th>    {/* no % */}
+                  <th className="p-3 text-center">Average</th>
+                  <th className="p-3 text-center">Box2</th>
+                  <th className="p-3 text-center">Box4</th>
                   <th className="p-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -69,26 +65,25 @@ export default function Recruiters({ recruiters = [], setRecruiters = ()=>{}, hi
         </CardContent>
       </Card>
 
-      {/* Info dialog same size as Edit Day */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className={MODAL_SIZES.workbench.className}>
-          <div className={MODAL_SIZES.workbench.contentClass}>
-            <DialogHeader><DialogTitle>Recruiter Info — {selected?.name}</DialogTitle></DialogHeader>
-            {selected && (
+        <DialogContent className="w-[92vw] max-w-[1200px] h-[82vh]">
+          <div className="h-full overflow-auto">
+            <DialogHeader><DialogTitle>Recruiter Info — {sel?.name}</DialogTitle></DialogHeader>
+            {sel && (
               <div className="grid gap-4 md:grid-cols-2 p-2">
                 <div className="space-y-2">
-                  <div><b>Crewcode:</b> {selected.crewCode}</div>
-                  <div><b>Rank:</b> {selected.rank}</div>
-                  <div><b>Mobile:</b> {selected.mobile}</div>
-                  <div><b>Email:</b> {selected.email}</div>
-                  <div><b>Status:</b> {selected.isInactive ? "Inactive" : "Active"}</div>
+                  <div><b>Crewcode:</b> {sel.crewCode}</div>
+                  <div><b>Rank:</b> {sel.rank}</div>
+                  <div><b>Mobile:</b> {sel.mobile}</div>
+                  <div><b>Email:</b> {sel.email}</div>
+                  <div><b>Status:</b> {sel.isInactive ? "Inactive" : "Active"}</div>
                 </div>
                 <div className="space-y-2">
                   <h4 className="font-semibold">Performance</h4>
-                  <p>Last 5 scores: {last5ScoresFor(history, selected.id).join(" - ") || "No data"}</p>
-                  <p>Average: <span style={{color:avgColor(last5ScoresFor(history, selected.id))}}>{avg(last5ScoresFor(history, selected.id))}</span></p>
-                  <p>Box2 (8w): {boxPercentsLast8w(history, selected.id).b2.toFixed(1)}%</p>
-                  <p>Box4 (8w): {boxPercentsLast8w(history, selected.id).b4.toFixed(1)}%</p>
+                  <p>Last 5 scores: {last5ScoresFor(history, sel.id).join(" - ") || "No data"}</p>
+                  <p>Average: <span style={{color:avgColor(last5ScoresFor(history, sel.id))}}>{avg(last5ScoresFor(history, sel.id))}</span></p>
+                  <p>Box2 (8w): {boxPercentsLast8w(history, sel.id).b2.toFixed(1)}%</p>
+                  <p>Box4 (8w): {boxPercentsLast8w(history, sel.id).b4.toFixed(1)}%</p>
                 </div>
               </div>
             )}
@@ -98,5 +93,4 @@ export default function Recruiters({ recruiters = [], setRecruiters = ()=>{}, hi
     </div>
   );
 }
-
 function avg(scores){ if(!scores?.length) return "0.0"; return (scores.reduce((a,b)=>a+Number(b||0),0)/scores.length).toFixed(1); }
