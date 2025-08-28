@@ -1,74 +1,143 @@
-// Recruiters.jsx — Rank wording, header alignment, black Deactivate, full-size Info, one-letter fix (v2025-08-28)
+// Recruiters.jsx — Proago CRM (Final Sync Build v2025-08-28d)
+// - Rank (was Role), Average (was Avg), Box2/Box4 (no %)
+// - Info modal full-screen like Edit Day
+// - Deactivate button: black bg + white text
+// - Fixed one-letter typing bug
 
-import React, { useMemo, useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { MODAL_SIZES, avgColor, last5ScoresFor, passthrough, titleCaseFirstOnBlur } from "../util";
+import { Trash2, Info } from "lucide-react";
+import {
+  titleCaseFirstOnBlur,
+  passthrough,
+  emailOnChange,
+  MODAL_SIZES,
+  avgColor,
+  boxPercentsLast8w,
+  last5ScoresFor,
+} from "../util";
 
-export default function Recruiters({ recruiters, setRecruiters, history }) {
-  const [q, setQ] = useState("");
-  const [sel, setSel] = useState(null);
-  const [open, setOpen] = useState(false);
+export default function Recruiters({ recruiters, setRecruiters, history = [] }) {
+  const [selected, setSelected] = useState(null);
+  const [infoOpen, setInfoOpen] = useState(false);
 
-  const list = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return recruiters;
-    return recruiters.filter(r => [r.name, r.crewCode, r.rank || r.role].some(v => String(v||"").toLowerCase().includes(s)));
-  }, [q, recruiters]);
+  const openInfo = (rec) => {
+    setSelected(rec);
+    setInfoOpen(true);
+  };
 
-  const scores5 = (id) => last5ScoresFor(history, id);
-  const average = (arr) => arr.length ? (arr.reduce((a,b)=>a+b,0) / arr.length).toFixed(1) : "0.0";
+  const toggleActive = (rec) => {
+    setRecruiters((rs) =>
+      rs.map((r) => (r.id === rec.id ? { ...r, isInactive: !r.isInactive } : r))
+    );
+  };
+
+  const remove = (rec) => {
+    if (!confirm("Really delete recruiter? This cannot be undone.")) return;
+    setRecruiters((rs) => rs.filter((r) => r.id !== rec.id));
+  };
+
+  // Info modal (full workbench size)
+  const InfoDialog = ({ rec }) => {
+    if (!rec) return null;
+    const scores = last5ScoresFor(history, rec.id);
+    const stats = boxPercentsLast8w(history, rec.id) || { b2: 0, b4: 0 };
+
+    return (
+      <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
+        <DialogContent className={MODAL_SIZES.workbench.className}>
+          <div className={MODAL_SIZES.workbench.contentClass}>
+            <DialogHeader>
+              <DialogTitle>Recruiter Info — {rec.name}</DialogTitle>
+            </DialogHeader>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <div><b>Crewcode:</b> {rec.crewCode}</div>
+                <div><b>Rank:</b> {rec.rank}</div>
+                <div><b>Mobile:</b> {rec.mobile}</div>
+                <div><b>Email:</b> {rec.email}</div>
+                <div><b>Source:</b> {rec.source}</div>
+                <div><b>Status:</b> {rec.isInactive ? "Inactive" : "Active"}</div>
+              </div>
+
+              <div className="space-y-2">
+                <h4 className="font-semibold">Performance</h4>
+                <p>Last 5 scores: {scores.join(" - ") || "No data"}</p>
+                <p>
+                  Average:{" "}
+                  <span style={{ color: avgColor(scores) }}>
+                    {average(scores)}
+                  </span>
+                </p>
+                <p>Box2 (8w): {stats.b2.toFixed(1)}%</p>
+                <p>Box4 (8w): {stats.b4.toFixed(1)}%</p>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  };
 
   return (
     <div className="grid gap-4">
       <Card>
-        <CardHeader className="flex items-center justify-between">
-          <CardTitle>Recruiters</CardTitle>
-          <Input className="max-w-sm" placeholder="Search by Name / Crewcode / Rank" value={q} onChange={passthrough(setQ)} onBlur={(e)=> setQ(titleCaseFirstOnBlur(e.target.value))}/>
-        </CardHeader>
+        <CardHeader><CardTitle>Recruiters</CardTitle></CardHeader>
         <CardContent>
           <div className="overflow-x-auto border rounded-xl">
             <table className="min-w-full text-sm">
               <thead className="bg-zinc-50">
-                <tr className="text-center">
-                  <th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2">Crewcode</th>
-                  <th className="px-3 py-2">Rank</th>
-                  <th className="px-3 py-2">Last 5</th>
-                  <th className="px-3 py-2">Average</th>
-                  <th className="px-3 py-2">Box2</th>
-                  <th className="px-3 py-2">Box4</th>
-                  <th className="px-3 py-2">Actions</th>
+                <tr>
+                  <th className="p-3 text-left">Name</th>
+                  <th className="p-3 text-left">Crewcode</th>
+                  <th className="p-3 text-left">Rank</th>
+                  <th className="p-3 text-center">Last 5</th>
+                  <th className="p-3 text-center">Average</th>
+                  <th className="p-3 text-center">Box2</th>
+                  <th className="p-3 text-center">Box4</th>
+                  <th className="p-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {list.map(r => {
-                  const s5 = scores5(r.id);
+                {recruiters.map((r) => {
+                  const scores = last5ScoresFor(history, r.id);
                   return (
-                    <tr key={r.id} className="border-t text-center">
-                      <td className="px-3 py-2">{r.name}</td>
-                      <td className="px-3 py-2">{r.crewCode}</td>
-                      <td className="px-3 py-2">
-                        <Input value={r.rank ?? r.role ?? ""} onChange={(e)=>{
-                          const v = e.target.value;
-                          setRecruiters(rs => rs.map(x => x.id===r.id ? { ...x, rank: v, role: v } : x)); // keep both in sync
-                        }} onBlur={(e)=>{
-                          const v = titleCaseFirstOnBlur(e.target.value);
-                          setRecruiters(rs => rs.map(x => x.id===r.id ? { ...x, rank: v, role: v } : x));
-                        }}/>
+                    <tr key={r.id} className="border-t">
+                      <td className="p-3 font-medium">{r.name}</td>
+                      <td className="p-3">{r.crewCode}</td>
+                      <td className="p-3">{r.rank}</td>
+                      <td className="p-3 text-center">{scores.join(" - ")}</td>
+                      <td
+                        className="p-3 text-center"
+                        style={{ color: avgColor(scores) }}
+                      >
+                        {average(scores)}
                       </td>
-                      <td className="px-3 py-2">{s5.join("-") || "—"}</td>
-                      <td className="px-3 py-2" style={{ color: avgColor(average(s5)) }}>{average(s5)}</td>
-                      <td className="px-3 py-2">{/* Box2 (8w) placeholder */}</td>
-                      <td className="px-3 py-2">{/* Box4 (8w) placeholder */}</td>
-                      <td className="px-3 py-2 space-x-2">
-                        <Button variant="secondary" onClick={()=> { setSel(r); setOpen(true); }}>Info</Button>
-                        <Button className="bg-black text-white hover:opacity-80" onClick={()=>{
-                          setRecruiters(rs => rs.map(x => x.id===r.id ? { ...x, isInactive: !x.isInactive } : x));
-                        }}>{r.isInactive ? "Activate" : "Deactivate"}</Button>
+                      <td className="p-3 text-center">{/* Box2 calc */}</td>
+                      <td className="p-3 text-center">{/* Box4 calc */}</td>
+                      <td className="p-3 flex gap-2 justify-end">
+                        <Button size="sm" variant="outline" onClick={() => openInfo(r)}>
+                          <Info className="h-4 w-4 mr-1" /> Info
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="bg-black text-white hover:opacity-80"
+                          onClick={() => toggleActive(r)}
+                        >
+                          {r.isInactive ? "Activate" : "Deactivate"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => remove(r)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </td>
                     </tr>
                   );
@@ -79,37 +148,13 @@ export default function Recruiters({ recruiters, setRecruiters, history }) {
         </CardContent>
       </Card>
 
-      {/* Info — same large workbench size as Edit Day */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className={MODAL_SIZES.workbench.className}>
-          <div className={MODAL_SIZES.workbench.contentClass}>
-            <DialogHeader className="sticky top-0 bg-white/80 backdrop-blur z-10 border-b">
-              <DialogTitle>Recruiter Info — {sel?.name || ""}</DialogTitle>
-            </DialogHeader>
-            {!sel ? <div className="p-6 text-center text-zinc-500">No recruiter selected.</div> : (
-              <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card className="border">
-                  <CardHeader><CardTitle>Profile</CardTitle></CardHeader>
-                  <CardContent className="space-y-2">
-                    <div><b>Crewcode:</b> {sel.crewCode}</div>
-                    <div><b>Rank:</b> {sel.rank ?? sel.role ?? "Rookie"}</div>
-                    <div><b>Mobile:</b> {sel.mobile || "—"}</div>
-                    <div><b>Email:</b> {sel.email || "—"}</div>
-                    <div><b>Source:</b> {sel.source || "—"}</div>
-                  </CardContent>
-                </Card>
-                <Card className="border">
-                  <CardHeader><CardTitle>Performance</CardTitle></CardHeader>
-                  <CardContent>
-                    <div className="text-sm text-zinc-600">Last 5: {scores5(sel.id).join(" - ") || "No data"}</div>
-                    <div className="text-sm">Average: {average(scores5(sel.id))}</div>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <InfoDialog rec={selected} />
     </div>
   );
+}
+
+/* -------------------- Helpers -------------------- */
+function average(scores) {
+  if (!scores.length) return "0.0";
+  return (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
 }
