@@ -1,163 +1,388 @@
-// Inflow.jsx — Inflow pipeline with Mobile prefix, Leads Date/Time, Source before Calls, one-letter fix (v2025-08-28)
+// Inflow.jsx — Proago CRM (Final Sync Build v2025-08-28c)
+// - Leads: Date + Time columns; Source before Calls
+// - Auto Date/Time on add (unless provided by import)
+// - Mobile with prefix dropdown (+352, +33, ...), numeric clean on blur
+// - Email typing bug fixed
+// - Interview & Formation dates independent
 
-import React, { useRef, useState } from "react";
-import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import React, { useMemo, useState } from "react";
+import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
 import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
-import { Badge } from "../components/ui/badge";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { Upload, Trash2, Plus, UserPlus } from "lucide-react";
-import { titleCaseFirstOnBlur, passthrough, normalizeNumericOnBlur, PHONE_PREFIXES, formatPhoneByCountry, clone } from "../util";
+import { Button } from "../components/ui/button";
+import {
+  passthrough,
+  titleCaseFirstOnBlur,
+  normalizeNumericOnBlur,
+  emailOnChange,
+  PHONE_PREFIXES,
+  fmtUK,
+} from "../util";
 
-const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
-  const [name, setName] = useState("");
-  const [prefix, setPrefix] = useState(PHONE_PREFIXES[0]);
-  const [digits, setDigits] = useState("");
-  const [email, setEmail] = useState("");
-  const [source, setSource] = useState("Indeed");
+export default function Inflow({ leads, setLeads }) {
+  // Draft lead form
+  const [draft, setDraft] = useState({
+    name: "",
+    email: "",
+    mobilePrefix: "+352",
+    mobileNumber: "",
+    source: "",
+    // Optional: allow manual set (e.g., when import provides)
+    dateISO: "",  // YYYY-MM-DD
+    timeHHMM: "", // HH:MM
+    calls: 0,
+  });
 
-  const reset = () => { setName(""); setPrefix(PHONE_PREFIXES[0]); setDigits(""); setEmail(""); setSource("Indeed"); };
+  const addLead = () => {
+    const now = new Date();
+    const dateISO = draft.dateISO || toISO(now);
+    const timeHHMM = draft.timeHHMM || toTime(now);
 
-  const preview = formatPhoneByCountry(prefix, digits);
+    const newLead = {
+      id: crypto.randomUUID(),
+      name: titleCaseFirstOnBlur(draft.name),
+      email: draft.email.trim(),
+      mobile: `${draft.mobilePrefix}${(draft.mobileNumber || "").replace(/\s+/g, "")}`,
+      source: draft.source ? titleCaseFirstOnBlur(draft.source) : "Unknown",
+      dateISO,          // Lead date (application/entry)
+      timeHHMM,         // Lead time (application/entry)
+      calls: clampCalls(draft.calls),
+      // Independent scheduling fields:
+      interviewDateISO: "",
+      interviewTimeHHMM: "",
+      formationDateISO: "",
+      formationTimeHHMM: "",
+      notes: "",
+    };
+
+    setLeads(prev => [newLead, ...prev]);
+    setDraft({
+      name: "",
+      email: "",
+      mobilePrefix: draft.mobilePrefix,
+      mobileNumber: "",
+      source: "",
+      dateISO: "",
+      timeHHMM: "",
+      calls: 0,
+    });
+  };
+
+  const updateLead = (id, patch) => {
+    setLeads(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)));
+  };
+
+  const columns = useMemo(() => ([
+    { key: "name", label: "Name" },
+    { key: "mobile", label: "Mobile" },
+    { key: "email", label: "Email" },
+    { key: "date", label: "Date" },
+    { key: "time", label: "Time" },
+    { key: "source", label: "Source" },
+    { key: "calls", label: "Calls" },
+    { key: "actions", label: "Actions" },
+  ]), []);
 
   return (
-    <Dialog open={open} onOpenChange={(v)=> { reset(); onOpenChange(v); }}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>New Lead</DialogTitle></DialogHeader>
-        <div className="grid gap-3">
-          <div className="grid gap-1">
-            <Label>Name</Label>
-            <Input value={name} onChange={passthrough(setName)} onBlur={(e)=> setName(titleCaseFirstOnBlur(e.target.value))} />
-          </div>
-          <div className="grid gap-1">
-            <Label>Mobile</Label>
+    <div className="space-y-6">
+      {/* Add Lead */}
+      <Card>
+        <CardHeader><CardTitle>Leads</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
+            {/* Name */}
+            <Input
+              placeholder="Name"
+              value={draft.name}
+              onChange={passthrough((v) => setDraft(d => ({ ...d, name: v })))}
+              onBlur={(e) => setDraft(d => ({ ...d, name: titleCaseFirstOnBlur(e.target.value) }))}
+            />
+
+            {/* Email */}
+            <Input
+              type="email"
+              placeholder="Email"
+              value={draft.email}
+              onChange={(e)=> setDraft(d => ({...d, email: e.target.value}))} // no transform while typing
+              onBlur={(e)=> setDraft(d => ({...d, email: e.target.value.trim()}))}
+            />
+
+            {/* Mobile: prefix + number */}
             <div className="flex gap-2">
-              <select className="h-10 border rounded-md px-2" value={prefix} onChange={(e)=> setPrefix(e.target.value)}>
-                {PHONE_PREFIXES.map(cc => <option key={cc} value={cc}>{cc}</option>)}
+              <select
+                className="border rounded-md px-2 h-10"
+                value={draft.mobilePrefix}
+                onChange={passthrough((v)=> setDraft(d => ({...d, mobilePrefix: v})))}
+              >
+                {PHONE_PREFIXES.map(p => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
               </select>
-              <Input className="flex-1" inputMode="numeric" placeholder="Digits only"
-                     value={digits}
-                     onChange={passthrough(setDigits)}
-                     onBlur={(e)=> setDigits(normalizeNumericOnBlur(e.target.value))} />
+              <Input
+                inputMode="tel"
+                placeholder="Mobile Number"
+                value={draft.mobileNumber}
+                onChange={passthrough((v)=> setDraft(d => ({...d, mobileNumber: v})))}
+                onBlur={(e)=> setDraft(d => ({...d, mobileNumber: normalizeNumericOnBlur(e.target.value)}))}
+              />
             </div>
-            <div className="text-xs text-zinc-500">{preview.flag} {preview.display}</div>
+
+            {/* Date & Time */}
+            <Input
+              type="date"
+              value={draft.dateISO}
+              onChange={passthrough((v)=> setDraft(d => ({...d, dateISO: v})))}
+            />
+            <Input
+              type="time"
+              value={draft.timeHHMM}
+              onChange={passthrough((v)=> setDraft(d => ({...d, timeHHMM: v})))}
+            />
+
+            {/* Source */}
+            <Input
+              placeholder="Source"
+              value={draft.source}
+              onChange={passthrough((v)=> setDraft(d => ({...d, source: v})))}
+              onBlur={(e)=> setDraft(d => ({...d, source: titleCaseFirstOnBlur(e.target.value)}))}
+            />
           </div>
-          <div className="grid gap-1">
-            <Label>Email</Label>
-            <Input type="email" value={email} onChange={passthrough(setEmail)} onBlur={(e)=> setEmail(e.target.value.trim())} />
-          </div>
-          <div className="grid gap-1">
-            <Label>Source</Label>
-            <select className="h-10 border rounded-md px-2" value={source} onChange={(e)=> setSource(e.target.value)}>
-              <option>Indeed</option><option>Street</option><option>Referral</option><option>Other</option>
+
+          {/* Calls & Add */}
+          <div className="flex items-center gap-3">
+            <label className="text-sm text-gray-600">Calls</label>
+            <select
+              className="border rounded-md h-10 px-2"
+              value={String(draft.calls)}
+              onChange={passthrough((v)=> setDraft(d => ({...d, calls: clampCalls(Number(v))})))}
+            >
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
             </select>
+
+            <Button onClick={addLead} className="ml-auto bg-black text-white hover:opacity-90">
+              Add Lead
+            </Button>
           </div>
-        </div>
-        <DialogFooter className="justify-between">
-          <Button variant="outline" onClick={()=> onOpenChange(false)}>Cancel</Button>
-          <Button style={{ background:"#d9010b", color:"white" }} onClick={()=>{
-            const nm = name.trim(); if (!nm) return alert("Name required");
-            if (!preview.ok) return alert("Enter a valid mobile number.");
-            const now = new Date();
-            const lead = {
-              id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()+Math.random()),
-              name: titleCaseFirstOnBlur(nm),
-              mobile: preview.display,
-              email: email.trim(),
-              source: source.trim(),
-              calls: 0,
-              // auto date/time for the moment added
-              date: now.toISOString().slice(0,10),
-              time: now.toISOString().slice(11,16),
-            };
-            onSave(lead); onOpenChange(false);
-          }}>Save</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </CardContent>
+      </Card>
+
+      {/* Leads Table */}
+      <Card>
+        <CardHeader><CardTitle>Pipeline</CardTitle></CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-zinc-50">
+                <tr>
+                  {columns.map(c => (
+                    <th key={c.key} className="px-3 py-2 text-xs font-semibold text-gray-600 text-center">
+                      {c.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {leads.map(lead => (
+                  <tr key={lead.id} className="border-t">
+                    {/* Name */}
+                    <td className="px-3 py-2 text-center">
+                      <Input
+                        value={lead.name || ""}
+                        onChange={passthrough((v)=> updateLead(lead.id, { name: v }))}
+                        onBlur={(e)=> updateLead(lead.id, { name: titleCaseFirstOnBlur(e.target.value) })}
+                      />
+                    </td>
+
+                    {/* Mobile */}
+                    <td className="px-3 py-2 text-center">
+                      <div className="flex gap-2 justify-center">
+                        <select
+                          className="border rounded-md px-2 h-10"
+                          value={extractPrefix(lead.mobile)}
+                          onChange={passthrough((v)=> updateLead(lead.id, { mobile: v + extractNumber(lead.mobile) }))}
+                        >
+                          {PHONE_PREFIXES.map(p => (
+                            <option key={p.value} value={p.value}>{p.value}</option>
+                          ))}
+                        </select>
+                        <Input
+                          inputMode="tel"
+                          value={extractNumber(lead.mobile)}
+                          onChange={passthrough((v)=> updateLead(lead.id, { mobile: extractPrefix(lead.mobile) + v }))}
+                          onBlur={(e)=> updateLead(lead.id, { mobile: extractPrefix(lead.mobile) + normalizeNumericOnBlur(e.target.value) })}
+                        />
+                      </div>
+                    </td>
+
+                    {/* Email */}
+                    <td className="px-3 py-2 text-center">
+                      <Input
+                        type="email"
+                        value={lead.email || ""}
+                        onChange={passthrough((v)=> updateLead(lead.id, { email: v }))}
+                        onBlur={(e)=> updateLead(lead.id, { email: e.target.value.trim() })}
+                      />
+                    </td>
+
+                    {/* Date */}
+                    <td className="px-3 py-2 text-center">
+                      <Input
+                        type="date"
+                        value={lead.dateISO || ""}
+                        onChange={passthrough((v)=> updateLead(lead.id, { dateISO: v }))}
+                      />
+                    </td>
+
+                    {/* Time */}
+                    <td className="px-3 py-2 text-center">
+                      <Input
+                        type="time"
+                        value={lead.timeHHMM || ""}
+                        onChange={passthrough((v)=> updateLead(lead.id, { timeHHMM: v }))}
+                      />
+                    </td>
+
+                    {/* Source */}
+                    <td className="px-3 py-2 text-center">
+                      <Input
+                        value={lead.source || ""}
+                        onChange={passthrough((v)=> updateLead(lead.id, { source: v }))}
+                        onBlur={(e)=> updateLead(lead.id, { source: titleCaseFirstOnBlur(e.target.value) })}
+                      />
+                    </td>
+
+                    {/* Calls */}
+                    <td className="px-3 py-2 text-center">
+                      <select
+                        className="border rounded-md h-10 px-2"
+                        value={String(lead.calls ?? 0)}
+                        onChange={passthrough((v)=> updateLead(lead.id, { calls: clampCalls(Number(v)) }))}
+                      >
+                        <option value="0">0</option>
+                        <option value="1">1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                      </select>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-3 py-2 text-center space-x-2">
+                      <Button
+                        className="bg-white text-gray-800 border hover:bg-gray-50"
+                        onClick={() => alert(JSON.stringify(lead, null, 2))}
+                      >
+                        Info
+                      </Button>
+                      <Button
+                        className="border-0"
+                        style={{ background: "#fca11c", color: "#000" }}
+                        onClick={() => moveToInterview(lead, setLeads)}
+                      >
+                        Move
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Interview Section */}
+      <StageSection
+        title="Interview"
+        leads={leads}
+        setLeads={setLeads}
+        stageKeyPrefix="interview"
+      />
+
+      {/* Formation Section */}
+      <StageSection
+        title="Formation"
+        leads={leads}
+        setLeads={setLeads}
+        stageKeyPrefix="formation"
+      />
+    </div>
   );
-};
+}
 
-export default function Inflow({ pipeline, setPipeline, onHire }) {
-  const fileRef = useRef(null);
-  const [addOpen, setAddOpen] = useState(false);
+/* -------------------- Stage (Interview / Formation) -------------------- */
 
-  const move = (item, from, to) => {
-    const next = clone(pipeline);
-    next[from] = next[from].filter((x)=> x.id !== item.id);
-    next[to].push(item);
-    setPipeline(next);
+function StageSection({ title, leads, setLeads, stageKeyPrefix }) {
+  const stageLeads = leads.filter(l => l._stage === stageKeyPrefix);
+
+  const update = (id, patch) => {
+    setLeads(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)));
   };
 
-  const del = (item, from) => {
-    if (!confirm("Delete?")) return;
-    const next = clone(pipeline);
-    next[from] = next[from].filter((x)=> x.id !== item.id);
-    setPipeline(next);
+  const backToLeads = (id) => {
+    setLeads(prev => prev.map(l => (l.id === id ? { ...l, _stage: undefined } : l)));
   };
 
-  const hire = (item) => {
-    let code = prompt("Crewcode (5 digits):"); if (!code) return;
-    code = String(code).trim();
-    if (!/^\d{5}$/.test(code)) return alert("Crewcode must be exactly 5 digits.");
-    onHire({ ...item, crewCode: code, rank: "Rookie", role: "Rookie" });
-    const next = clone(pipeline); next.formation = next.formation.filter((x)=> x.id !== item.id); setPipeline(next);
-  };
-
-  // Section
-  const Section = ({ title, keyName, prev, nextKey, extra }) => (
-    <Card className="border-2">
-      <CardHeader>
-        <CardTitle className="flex justify-between items-center">
-          <span>{title}</span>
-          <Badge>{pipeline[keyName].length}</Badge>
-        </CardTitle>
-      </CardHeader>
+  return (
+    <Card>
+      <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
       <CardContent>
-        <div className="overflow-x-auto border rounded-xl">
+        <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-zinc-50">
               <tr>
-                <th className="p-3 text-left">Name</th>
-                <th className="p-3">Mobile</th>
-                <th className="p-3">Email</th>
-                <th className="p-3">Source</th>
-                {keyName === "leads" && <th className="p-3">Calls</th>}
-                <th className="p-3">Date</th>
-                <th className="p-3">Time</th>
-                <th className="p-3 text-right">Actions</th>
+                <th className="px-3 py-2 text-xs font-semibold text-gray-600 text-center">Name</th>
+                <th className="px-3 py-2 text-xs font-semibold text-gray-600 text-center">Mobile</th>
+                <th className="px-3 py-2 text-xs font-semibold text-gray-600 text-center">Email</th>
+                <th className="px-3 py-2 text-xs font-semibold text-gray-600 text-center">Date</th>
+                <th className="px-3 py-2 text-xs font-semibold text-gray-600 text-center">Time</th>
+                <th className="px-3 py-2 text-xs font-semibold text-gray-600 text-center">Notes</th>
+                <th className="px-3 py-2 text-xs font-semibold text-gray-600 text-center">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {pipeline[keyName].map((x) => (
-                <tr key={x.id} className="border-t">
-                  <td className="p-3 font-medium">{x.name}</td>
-                  <td className="p-3">{x.mobile || x.phone || ""}</td>
-                  <td className="p-3">
-                    <Input value={x.email || ""} onChange={(e)=>{
-                      setPipeline(p => ({ ...p, [keyName]: p[keyName].map(it => it.id===x.id ? { ...it, email: e.target.value } : it) }));
-                    }} onBlur={(e)=>{
-                      setPipeline(p => ({ ...p, [keyName]: p[keyName].map(it => it.id===x.id ? { ...it, email: e.target.value.trim() } : it) }));
-                    }}/>
+              {stageLeads.length === 0 ? (
+                <tr><td className="px-3 py-6 text-center text-gray-500" colSpan={7}>No entries.</td></tr>
+              ) : stageLeads.map(lead => (
+                <tr key={lead.id} className="border-t">
+                  <td className="px-3 py-2 text-center">{lead.name}</td>
+                  <td className="px-3 py-2 text-center">{lead.mobile || "—"}</td>
+                  <td className="px-3 py-2 text-center">
+                    <Input
+                      type="email"
+                      value={lead.email || ""}
+                      onChange={passthrough((v)=> update(lead.id, { email: v }))}
+                      onBlur={(e)=> update(lead.id, { email: e.target.value.trim() })}
+                    />
                   </td>
-                  <td className="p-3">{x.source || ""}</td>
-                  {keyName === "leads" && <td className="p-3">{x.calls ?? 0}</td>}
-                  <td className="p-3">
-                    <Input type="date" value={x.date || ""} onChange={(e)=>{
-                      setPipeline(p => ({ ...p, [keyName]: p[keyName].map(it => it.id===x.id ? { ...it, date: e.target.value } : it) }));
-                    }}/>
+                  <td className="px-3 py-2 text-center">
+                    <Input
+                      type="date"
+                      value={lead[`${stageKeyPrefix}DateISO`] || ""}
+                      onChange={passthrough((v)=> update(lead.id, { [`${stageKeyPrefix}DateISO`]: v }))}
+                    />
                   </td>
-                  <td className="p-3">
-                    <Input type="time" value={x.time || ""} onChange={(e)=>{
-                      setPipeline(p => ({ ...p, [keyName]: p[keyName].map(it => it.id===x.id ? { ...it, time: e.target.value } : it) }));
-                    }}/>
+                  <td className="px-3 py-2 text-center">
+                    <Input
+                      type="time"
+                      value={lead[`${stageKeyPrefix}TimeHHMM`] || ""}
+                      onChange={passthrough((v)=> update(lead.id, { [`${stageKeyPrefix}TimeHHMM`]: v }))}
+                    />
                   </td>
-                  <td className="p-3 flex gap-2 justify-end">
-                    {prev && <Button size="sm" variant="outline" style={{ background:"#fca11c", color:"black" }} onClick={()=> move(x, keyName, prev)}>Back</Button>}
-                    {nextKey && <Button size="sm" style={{ background:"#fca11c", color:"black" }} onClick={()=> move(x, keyName, nextKey)}>Move →</Button>}
-                    {extra && extra(x)}
-                    <Button size="sm" variant="destructive" onClick={()=> del(x, keyName)}><Trash2 className="h-4 w-4"/></Button>
+                  <td className="px-3 py-2 text-center">
+                    <Input
+                      value={lead.notes || ""}
+                      onChange={passthrough((v)=> update(lead.id, { notes: v }))}
+                      onBlur={(e)=> update(lead.id, { notes: titleCaseFirstOnBlur(e.target.value) })}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-center space-x-2">
+                    <Button className="bg-white text-gray-800 border hover:bg-gray-50" onClick={() => update(lead.id, { _stage: undefined })}>
+                      Back
+                    </Button>
+                    <Button className="bg-black text-white hover:opacity-90">
+                      Done
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -167,27 +392,39 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
       </CardContent>
     </Card>
   );
+}
 
-  return (
-    <div className="grid gap-4">
-      <div className="flex justify-between items-center">
-        <h3 className="font-semibold">Inflow</h3>
-        <div className="flex gap-2">
-          <Button onClick={()=> fileRef.current?.click()}><Upload className="h-4 w-4 mr-1" />Import</Button>
-          <input ref={fileRef} type="file" hidden accept="application/json" />
-          <Button style={{ background:"#d9010b", color:"white" }} onClick={()=> setAddOpen(true)}><Plus className="h-4 w-4 mr-1" />Add Lead</Button>
-        </div>
-      </div>
+/* -------------------- Helpers -------------------- */
 
-      {/* Sections */}
-      <Section title="Leads" keyName="leads" nextKey="interview" />
-      <Section title="Interview" keyName="interview" prev="leads" nextKey="formation" />
-      <Section title="Formation" keyName="formation" prev="interview" extra={(x)=>(
-        <Button size="sm" onClick={()=> hire(x)}><UserPlus className="h-4 w-4 mr-1" />Hire</Button>
-      )}/>
+function moveToInterview(lead, setLeads) {
+  setLeads(prev => prev.map(l => (l.id === lead.id ? { ...l, _stage: "interview" } : l)));
+}
 
-      <AddLeadDialog open={addOpen} onOpenChange={setAddOpen}
-        onSave={(lead)=> setPipeline(p => ({ ...p, leads: [lead, ...p.leads] }))}/>
-    </div>
-  );
+function toISO(d) {
+  const z = new Date(d);
+  z.setHours(0, 0, 0, 0);
+  return z.toISOString().slice(0, 10);
+}
+
+function toTime(d) {
+  const z = new Date(d);
+  const hh = String(z.getHours()).padStart(2, "0");
+  const mm = String(z.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function clampCalls(n) {
+  const x = Number(n || 0);
+  return x < 0 ? 0 : x > 3 ? 3 : x;
+}
+
+function extractPrefix(full) {
+  if (!full) return "+352";
+  const m = full.match(/^\+?\d+/);
+  return m ? (m[0].startsWith("+") ? m[0] : `+${m[0]}`) : "+352";
+}
+
+function extractNumber(full) {
+  if (!full) return "";
+  return String(full).replace(/^\+?\d+/, "");
 }
