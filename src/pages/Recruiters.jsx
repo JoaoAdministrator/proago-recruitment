@@ -1,28 +1,25 @@
 // Recruiters.jsx
-// Proago CRM component (updated build v2025-08-28 with Chat 9 changes)
+// Proago CRM (v2025-08-28 • Chat 10 updates)
+// - Info dialog: fixed blank (date field used dateISO|date)
+// - Column headers: "Average", "Box 2", "Box 4"; centered to match body
+// - "Role" wording shown as "Rank" (underlying field remains role)
+// - Deactivate button black with white text
 
 import React, { useState } from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Input } from "../components/ui/input";
-import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
-import { Edit3, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { titleCase, avgColor, clone } from "../util";
 
-export default function Recruiters({ recruiters, setRecruiters, history, setHistory }) {
+export default function Recruiters({ recruiters, setRecruiters, history }) {
   const [selected, setSelected] = useState(null);
   const [infoOpen, setInfoOpen] = useState(false);
 
-  const openInfo = (rec) => {
-    setSelected(rec);
-    setInfoOpen(true);
-  };
+  const openInfo = (rec) => { setSelected(rec); setInfoOpen(true); };
 
   const toggleActive = (rec) => {
-    setRecruiters(rs =>
-      rs.map(r => r.id === rec.id ? { ...r, isInactive: !r.isInactive } : r)
-    );
+    setRecruiters(rs => rs.map(r => r.id === rec.id ? ({ ...r, isInactive: !r.isInactive }) : r));
   };
 
   const remove = (rec) => {
@@ -31,20 +28,17 @@ export default function Recruiters({ recruiters, setRecruiters, history, setHist
   };
 
   const last5Scores = (recId) => {
-    const scores = history.filter(h => h.recruiterId === recId).slice(-5).map(h => h.score);
+    const scores = history.filter(h => h.recruiterId === recId).slice(-5).map(h => Number(h.score) || 0);
     return scores;
   };
 
-  const average = (scores) => {
-    if (!scores.length) return 0;
-    return (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
-  };
+  const average = (scores) => !scores.length ? 0 : (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1);
 
   // monthly revenue & wages from history
   const thisMonthStats = (recId) => {
     const now = new Date();
     const ym = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-    const rows = history.filter(h => h.recruiterId === recId && h.date.startsWith(ym));
+    const rows = history.filter(h => h.recruiterId === recId && (h.dateISO || h.date || "").startsWith(ym));
     const wages = rows.reduce((s, r) => s + (r.wages || 0), 0);
     const revenue = rows.reduce((s, r) => s + (r.income || 0), 0);
     return { wages, revenue };
@@ -54,13 +48,10 @@ export default function Recruiters({ recruiters, setRecruiters, history, setHist
     if (!rec) return null;
     const scores = last5Scores(rec.id);
     const stats = thisMonthStats(rec.id);
-
     return (
       <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
         <DialogContent className="max-w-4xl h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Recruiter Info — {titleCase(rec.name)}</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>Recruiter Info — {titleCase(rec.name)}</DialogTitle></DialogHeader>
           <div className="grid gap-4">
             <div className="flex gap-4">
               <div>
@@ -70,9 +61,7 @@ export default function Recruiters({ recruiters, setRecruiters, history, setHist
                     if (!file) return;
                     const reader = new FileReader();
                     reader.onload = () => {
-                      setRecruiters(rs =>
-                        rs.map(r => r.id === rec.id ? { ...r, photo: reader.result } : r)
-                      );
+                      setRecruiters(rs => rs.map(r => r.id === rec.id ? ({ ...r, photo: reader.result }) : r));
                     };
                     reader.readAsDataURL(file);
                   }}
@@ -81,8 +70,8 @@ export default function Recruiters({ recruiters, setRecruiters, history, setHist
               </div>
               <div className="grid gap-2">
                 <div><b>Crewcode:</b> {rec.crewCode}</div>
-                <div><b>Role:</b> {rec.role}</div>
-                <div><b>Phone:</b> {rec.phone}</div>
+                <div><b>Rank:</b> {rec.role}</div>
+                <div><b>Mobile:</b> {rec.phone}</div>
                 <div><b>Email:</b> {rec.email}</div>
                 <div><b>Source:</b> {rec.source}</div>
                 <div><b>This Month Wages:</b> €{stats.wages.toFixed(2)}</div>
@@ -94,8 +83,8 @@ export default function Recruiters({ recruiters, setRecruiters, history, setHist
               <h4 className="font-semibold">Performance</h4>
               <p>Last 5 scores: {scores.join(" - ") || "No data"}</p>
               <p>Average: <span style={{ color: avgColor(average(scores)) }}>{average(scores)}</span></p>
-              <p>Box2% (8w): {/* calc Box2% */}</p>
-              <p>Box4% (8w): {/* calc Box4% */}</p>
+              <p>Box 2: {/* calc */}</p>
+              <p>Box 4: {/* calc */}</p>
             </div>
           </div>
         </DialogContent>
@@ -113,12 +102,12 @@ export default function Recruiters({ recruiters, setRecruiters, history, setHist
               <thead className="bg-zinc-50">
                 <tr>
                   <th className="p-3 text-left">Name</th>
-                  <th className="p-3">Crewcode</th>
-                  <th className="p-3">Role</th>
-                  <th className="p-3">Last 5</th>
-                  <th className="p-3">Avg</th>
-                  <th className="p-3">Box2%</th>
-                  <th className="p-3">Box4%</th>
+                  <th className="p-3 text-center">Crewcode</th>
+                  <th className="p-3 text-center">Rank</th>
+                  <th className="p-3 text-center">Last 5</th>
+                  <th className="p-3 text-center">Average</th>
+                  <th className="p-3 text-center">Box 2</th>
+                  <th className="p-3 text-center">Box 4</th>
                   <th className="p-3 text-right">Actions</th>
                 </tr>
               </thead>
@@ -127,16 +116,16 @@ export default function Recruiters({ recruiters, setRecruiters, history, setHist
                   const scores = last5Scores(r.id);
                   return (
                     <tr key={r.id} className="border-t">
-                      <td className="p-3 font-medium">{titleCase(r.name)}</td>
-                      <td className="p-3">{r.crewCode}</td>
-                      <td className="p-3">{r.role}</td>
-                      <td className="p-3">{scores.join("-")}</td>
-                      <td className="p-3" style={{ color: avgColor(average(scores)) }}>{average(scores)}</td>
-                      <td className="p-3">{/* Box2% calc */}</td>
-                      <td className="p-3">{/* Box4% calc */}</td>
+                      <td className="p-3 font-medium text-left">{titleCase(r.name)}</td>
+                      <td className="p-3 text-center">{r.crewCode}</td>
+                      <td className="p-3 text-center">{r.role}</td>
+                      <td className="p-3 text-center">{scores.join("-")}</td>
+                      <td className="p-3 text-center" style={{ color: avgColor(average(scores)) }}>{average(scores)}</td>
+                      <td className="p-3 text-center">{/* Box 2 calc */}</td>
+                      <td className="p-3 text-center">{/* Box 4 calc */}</td>
                       <td className="p-3 flex gap-2 justify-end">
                         <Button size="sm" variant="outline" onClick={() => openInfo(r)}>Info</Button>
-                        <Button size="sm" style={{ background: "#fca11c", color: "black" }} onClick={() => toggleActive(r)}>
+                        <Button size="sm" style={{ background: "black", color: "white" }} onClick={() => toggleActive(r)}>
                           {r.isInactive ? "Activate" : "Deactivate"}
                         </Button>
                         <Button size="sm" variant="destructive" onClick={() => remove(r)}>
