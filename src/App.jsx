@@ -1,43 +1,38 @@
-// App.jsx — Proago CRM (Chat 9 base + requested changes only)
-//
-// Changes:
-// • Default tab = "inflow" (open in Leads)
-// • Login screen kept (Oscar/Sergio R4mos, Joao/Ruben Di4s)
-// • Tabs show “Pay” instead of “Wages”
-// • Week badge kept on one line; “Proago CRM” on one line
+// App.jsx — Chat 9 baseline + EXACT requested changes
+// • Default tab = "inflow" (Leads first)
+// • Login page restored (Oscar/Sergio R4mos, Joao/Ruben Di4s)
+// • Tab label "Wages" → "Pay"
+// • Header text kept on one line
 
 import React, { useEffect, useMemo, useState } from "react";
 import Inflow from "./pages/Inflow";
 import Recruiters from "./pages/Recruiters";
 import Planning from "./pages/Planning";
-import Wages from "./pages/Wages";   // UI label shows Pay
+import Wages from "./pages/Wages"; // label handled in tabs
 import Finances from "./pages/Finances";
 import Settings from "./pages/Settings";
 
-import { BRAND, load, save, K, startOfWeekMon, weekNumberISO } from "./util";
-import { Button } from "./components/ui/button";
-import { Badge } from "./components/ui/badge";
-
-const TABS = [
-  { key: "inflow", label: "Inflow" },
-  { key: "recruiters", label: "Recruiters" },
-  { key: "planning", label: "Planning" },
-  { key: "wages", label: "Pay" },          // label change only
-  { key: "finances", label: "Finances" },
-  { key: "settings", label: "Settings" },
-];
+import { load, save, K, startOfWeekMon, weekNumberISO } from "./util";
 
 const USERS = [
   { u: "Oscar", p: "Sergio R4mos" },
   { u: "Joao",  p: "Ruben Di4s"   },
 ];
 
+const TABS = [
+  { key: "inflow",     label: "Inflow"    },
+  { key: "recruiters", label: "Recruiters"},
+  { key: "planning",   label: "Planning"  },
+  { key: "wages",      label: "Pay"       }, // label changed
+  { key: "finances",   label: "Finances"  },
+  { key: "settings",   label: "Settings"  },
+];
+
 export default function App() {
-  // ---------- Auth ----------
+  // --- Auth (restored) ---
   const [auth, setAuth] = useState(() => load(K.auth, null));
   const [u, setU] = useState("");
   const [p, setP] = useState("");
-
   useEffect(() => save(K.auth, auth), [auth]);
 
   const tryLogin = () => {
@@ -47,8 +42,8 @@ export default function App() {
     setU(""); setP("");
   };
 
-  // ---------- State ----------
-  const [tab, setTab] = useState("inflow"); // open in Leads by default ✅
+  // --- App state (Chat 9 shape) ---
+  const [tab, setTab] = useState("inflow"); // open in Leads
   const [leads, setLeads] = useState(() => load(K.leads, []));
   const [recruiters, setRecruiters] = useState(() => load(K.recruiters, []));
   const [planning, setPlanning] = useState(() => load(K.planning, {
@@ -74,12 +69,13 @@ export default function App() {
 
   const weekBadge = useMemo(() => `Week ${weekNumberISO(new Date(planning.weekStartISO))}`, [planning.weekStartISO]);
 
+  // --- Login screen (restored) ---
   if (!auth) {
     return (
       <div className="min-h-screen grid place-items-center bg-gray-50">
         <div className="w-full max-w-md bg-white rounded-xl shadow border p-6">
           <div className="flex items-center gap-3 mb-4">
-            <div style={{width:28,height:28,borderRadius:6,background:`linear-gradient(135deg, ${BRAND.primary}, ${BRAND.secondary})`}} />
+            <div style={{width:28,height:28,borderRadius:6,background:"#d9010b"}} />
             <div className="text-xl font-semibold" style={{whiteSpace:"nowrap"}}>Proago CRM</div>
           </div>
           <div className="space-y-3">
@@ -93,7 +89,7 @@ export default function App() {
               Oscar / <span className="font-mono">Sergio R4mos</span><br/>
               Joao / <span className="font-mono">Ruben Di4s</span>
             </div>
-            <Button onClick={tryLogin} className="bg-black text-white hover:opacity-90">Login</Button>
+            <button onClick={tryLogin} className="px-3 py-2 bg-black text-white rounded-md">Login</button>
           </div>
         </div>
       </div>
@@ -105,27 +101,27 @@ export default function App() {
       <header className="sticky top-0 z-10 border-b bg-white">
         <div className="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div style={{width:28,height:28,borderRadius:6,background:`linear-gradient(135deg, ${BRAND.primary}, ${BRAND.secondary})`}} />
+            <div style={{width:28,height:28,borderRadius:6,background:"#d9010b"}} />
             <div className="text-lg font-semibold" style={{whiteSpace:"nowrap"}}>Proago CRM</div>
-            <Badge style={{ background: BRAND.accent, color: "#000" }}>{weekBadge}</Badge>
+            <span className="text-sm border px-2 py-0.5 rounded">{weekBadge}</span>
           </div>
           <nav className="flex items-center gap-1">
             {TABS.map(t=>(
               <button key={t.key} onClick={()=>setTab(t.key)}
-                className={`px-3 py-2 rounded-md text-sm font-medium ${tab===t.key?"bg-black text-white":"hover:bg-gray-100 text-gray-700"}`}>
+                className={`px-3 py-2 rounded-md text-sm ${tab===t.key?"bg-black text-white":"hover:bg-gray-100 text-gray-700"}`}>
                 {t.label}
               </button>
             ))}
           </nav>
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray-600">Hi, {auth.user}</span>
-            <Button variant="outline" onClick={()=>setAuth(null)}>Logout</Button>
+            <button className="px-3 py-2 border rounded-md" onClick={()=>setAuth(null)}>Logout</button>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6">
-        {tab==="inflow" && <Inflow leads={leads} setLeads={setLeads} recruiters={recruiters} setRecruiters={setRecruiters} />}
+        {tab==="inflow" && <Inflow leads={leads} setLeads={setLeads} />}
         {tab==="recruiters" && <Recruiters recruiters={recruiters} setRecruiters={setRecruiters} history={history} />}
         {tab==="planning" && (
           <Planning
