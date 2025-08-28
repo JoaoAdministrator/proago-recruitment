@@ -1,562 +1,161 @@
-// Planning.jsx
-// Proago CRM component (updated v2025-08-28 • Chat 9 changes)
+// Planning.jsx — Edit Day width x2, B2s/B4s fixed, show recruiter rows only after click, preview tweaks (centered Zone, remove Project), week/title single-line (v2025-08-28d)
 
-import React, { useEffect, useState } from "react";
-import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import React, { useState } from "react";
+import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
-import { Badge } from "../components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "../components/ui/dialog";
-import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
+import { Button } from "../components/ui/button";
+import { MODAL_SIZES, titleCaseFirstOnBlur, passthrough, normalizeNumericOnBlur } from "../util";
 
-import {
-  clone,
-  fmtISO,
-  fmtUK,
-  addDays,
-  startOfWeekMon,
-  weekNumberISO,
-} from "../util";
+export default function Planning({ week, days, setDays }) {
+  const [editing, setEditing] = useState(null);
 
-/* ---------- helpers (local) ---------- */
-const scoreColor = (v) => (v >= 3 ? "#10b981" : v >= 2 ? "#fbbf24" : "#ef4444");
-
-// upsert history by (recruiterId, dateISO, _rowKey)
-const upsertHistory = (list, row) => {
-  const key = (r) => `${r.recruiterId}|${r.dateISO}|${r._rowKey ?? -1}`;
-  const map = new Map(list.map((r) => [key(r), r]));
-  map.set(key(row), { ...(map.get(key(row)) || {}), ...row });
-  return Array.from(map.values());
-};
-
-// numeric value sanitizer
-const onlyNum = (s) => {
-  // allow empty (""), otherwise digits only
-  const t = String(s ?? "");
-  if (t === "") return "";
-  const m = t.match(/^\d+$/);
-  return m ? t : t.replace(/\D+/g, "");
-};
-
-/* ---------- Planning ---------- */
-export default function Planning({
-  recruiters,
-  planning,
-  setPlanning,
-  history,
-  setHistory,
-}) {
-  const [weekStart, setWeekStart] = useState(
-    () => fmtISO(startOfWeekMon(new Date()))
-  );
-  const weekNum = weekNumberISO(new Date(weekStart));
-
-  // ensure week/day structure exists
-  useEffect(() => {
-    setPlanning((prev) => {
-      const next = clone(prev || {});
-      if (!next[weekStart]) next[weekStart] = { days: {} };
-      for (let i = 0; i < 7; i++) {
-        const d = fmtISO(addDays(new Date(weekStart), i));
-        if (!next[weekStart].days[d])
-          next[weekStart].days[d] = { teams: [] };
-      }
-      return next;
+  const updateDayField = (dayIndex, key, value) => {
+    setDays((prev) => {
+      const copy = [...prev];
+      const d = { ...copy[dayIndex], [key]: value };
+      copy[dayIndex] = d;
+      return copy;
     });
-  }, [weekStart, setPlanning]);
-
-  const dayData = (iso) =>
-    planning?.[weekStart]?.days?.[iso] ?? { teams: [] };
-
-  /* ---------- Edit Day (full screen) ---------- */
-  const [editDateISO, setEditDateISO] = useState(null);
-  const [draft, setDraft] = useState(null);
-
-  const openEdit = (iso) => {
-    const d = clone(dayData(iso));
-    // normalize rows to contain a stable _rowKey
-    d.teams = (d.teams || []).map((t, ti) => ({
-      zone: t.zone || "",
-      project: t.project || "HF",
-      shiftType: t.shiftType || "D2D",
-      rows: (t.rows || []).map((r, i) => ({
-        _rowKey: r?._rowKey ?? i,
-        recruiterId: r.recruiterId || "",
-        hours: r.hours ?? "",
-        commissionMult: r.commissionMult ?? "",
-        score: r.score ?? "",
-        box2_noDisc: r.box2_noDisc ?? "",
-        box2_disc: r.box2_disc ?? "",
-        box4_noDisc: r.box4_noDisc ?? "",
-        box4_disc: r.box4_disc ?? "",
-      })),
-    }));
-    setEditDateISO(iso);
-    setDraft(d);
-  };
-
-  const closeEdit = () => {
-    setEditDateISO(null);
-    setDraft(null);
-  };
-
-  const usedIds = (d) => {
-    const s = new Set();
-    (d?.teams || []).forEach((t) =>
-      (t.rows || []).forEach((r) => r.recruiterId && s.add(r.recruiterId))
-    );
-    return s;
-  };
-
-  const addTeam = () =>
-    setDraft((d) => ({
-      ...d,
-      teams: [...(d?.teams || []), { zone: "", project: "HF", shiftType: "D2D", rows: [] }],
-    }));
-
-  const delTeam = (ti) =>
-    setDraft((d) => ({
-      ...d,
-      teams: (d?.teams || []).filter((_, i) => i !== ti),
-    }));
-
-  const setTeam = (ti, patch) =>
-    setDraft((d) => {
-      const teams = clone(d.teams || []);
-      teams[ti] = { ...teams[ti], ...patch };
-      return { ...d, teams };
-    });
-
-  const addRow = (ti) =>
-    setDraft((d) => {
-      const teams = clone(d.teams || []);
-      const nextKey = teams[ti].rows?.length || 0;
-      (teams[ti].rows ||= []).push({
-        _rowKey: nextKey,
-        recruiterId: "",
-        hours: "",
-        commissionMult: "",
-        score: "",
-        box2_noDisc: "",
-        box2_disc: "",
-        box4_noDisc: "",
-        box4_disc: "",
-      });
-      return { ...d, teams };
-    });
-
-  const delRow = (ti, ri) =>
-    setDraft((d) => {
-      const teams = clone(d.teams || []);
-      teams[ti].rows = (teams[ti].rows || []).filter((_, i) => i !== ri);
-      return { ...d, teams };
-    });
-
-  const setRow = (ti, ri, patch) =>
-    setDraft((d) => {
-      const teams = clone(d.teams || []);
-      const prevRow = teams[ti].rows[ri];
-      const nextRow = { ...prevRow, ...patch };
-
-      // prevent duplicate recruiter (allow keeping the same one)
-      if (patch.recruiterId) {
-        const ids = usedIds({ teams });
-        const already =
-          ids.has(patch.recruiterId) && prevRow.recruiterId !== patch.recruiterId;
-        if (already) {
-          alert("This recruiter is already assigned today.");
-          return d;
-        }
-      }
-
-      teams[ti].rows[ri] = nextRow;
-      return { ...d, teams };
-    });
-
-  const saveDay = () => {
-    if (!draft) return;
-    const iso = editDateISO;
-
-    // validate totals vs score
-    for (const t of draft.teams || []) {
-      for (const r of t.rows || []) {
-        const sc = Number(r.score || 0);
-        const sum =
-          Number(r.box2_noDisc || 0) +
-          Number(r.box2_disc || 0) +
-          Number(r.box4_noDisc || 0) +
-          Number(r.box4_disc || 0);
-        if (sum > sc) {
-          alert("Box2/Box4 totals (no-discount + discount) cannot exceed Score.");
-          return;
-        }
-      }
-    }
-
-    // write planning
-    setPlanning((prev) => {
-      const next = clone(prev || {});
-      if (!next[weekStart]) next[weekStart] = { days: {} };
-      next[weekStart].days[iso] = clone(draft);
-      return next;
-    });
-
-    // write history (upsert)
-    setHistory((prev) => {
-      let out = [...prev];
-      (draft.teams || []).forEach((t) => {
-        (t.rows || []).forEach((r, i) => {
-          if (!r.recruiterId) return;
-          out = upsertHistory(out, {
-            _rowKey: r._rowKey ?? i,
-            dateISO: iso,
-            recruiterId: r.recruiterId,
-            recruiterName:
-              recruiters.find((x) => x.id === r.recruiterId)?.name || "",
-            location: t.zone || "",
-            project: t.project || "HF",
-            shiftType: t.shiftType || "D2D",
-            hours: r.hours === "" ? undefined : Number(r.hours),
-            commissionMult:
-              r.commissionMult === "" ? undefined : Number(r.commissionMult),
-            score: r.score === "" ? undefined : Number(r.score),
-            box2_noDisc:
-              r.box2_noDisc === "" ? undefined : Number(r.box2_noDisc),
-            box2_disc: r.box2_disc === "" ? undefined : Number(r.box2_disc),
-            box4_noDisc:
-              r.box4_noDisc === "" ? undefined : Number(r.box4_noDisc),
-            box4_disc: r.box4_disc === "" ? undefined : Number(r.box4_disc),
-          });
-        });
-      });
-      return out;
-    });
-
-    closeEdit();
-  };
-
-  /* ---------- Day card ---------- */
-  const DayCard = ({ i }) => {
-    const dISO = fmtISO(addDays(new Date(weekStart), i));
-    const day = dayData(dISO);
-    const weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][i];
-
-    return (
-      <Card className="flex-1">
-        <CardHeader className="pb-2">
-          <CardTitle className="flex flex-col items-center text-center">
-            <span className="leading-tight">{weekday}</span>
-            <span className="text-sm text-zinc-500 leading-tight">{fmtUK(dISO)}</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3 pt-0">
-          {(day.teams || []).length ? (
-            day.teams.map((t, ti) => (
-              <div key={ti} className="border rounded-lg p-2">
-                <div className="font-medium">
-                  {t.zone || "—"} <span className="text-xs text-zinc-600">• {t.project || "HF"}</span>
-                </div>
-                {(t.rows || []).length ? (
-                  <ul className="text-sm space-y-1 mt-1">
-                    {t.rows.map((r, ri) => {
-                      const rec = recruiters.find((x) => x.id === r.recruiterId);
-                      const sc = r.score !== "" && r.score != null ? Number(r.score) : "";
-                      return (
-                        <li key={ri} className="flex items-center justify-between">
-                          <span>{rec?.name || ""}</span>
-                          <span
-                            className="text-base font-medium"
-                            style={{ color: sc !== "" ? scoreColor(sc) : undefined }}
-                          >
-                            {sc !== "" ? sc : ""}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <div className="text-sm text-zinc-500">No recruiters</div>
-                )}
-              </div>
-            ))
-          ) : (
-            <div className="text-sm text-muted-foreground">No shifts yet</div>
-          )}
-
-          <div className="flex justify-center pt-1">
-            <Button variant="outline" size="sm" onClick={() => openEdit(dISO)}>
-              Edit Day
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    );
   };
 
   return (
-    <div className="grid gap-4">
-      {/* Week header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() =>
-              setWeekStart(fmtISO(addDays(new Date(weekStart), -7)))
-            }
-          >
-            <ChevronLeft className="h-4 w-4" /> Prev
-          </Button>
-          <Badge style={{ background: "#fca11c" }}>Week {weekNum}</Badge>
-          <Button
-            variant="outline"
-            onClick={() =>
-              setWeekStart(fmtISO(addDays(new Date(weekStart), 7)))
-            }
-          >
-            Next <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-
-      {/* Days grid */}
-      <div className="grid gap-4 grid-cols-1 md:grid-cols-3 xl:grid-cols-7">
-        {Array.from({ length: 7 }).map((_, i) => (
-          <DayCard key={i} i={i} />
-        ))}
-      </div>
-
-      {/* Full-screen Edit Day */}
-      <Dialog open={!!editDateISO} onOpenChange={(open) => !open && closeEdit()}>
-        <DialogContent className="max-w-[95vw] w-[95vw] h-[90vh] p-4">
-          <DialogHeader>
-            <DialogTitle>Edit Day — {fmtUK(editDateISO || "")}</DialogTitle>
-          </DialogHeader>
-
-          <div className="grid gap-3 h-[calc(90vh-5rem)] overflow-y-auto pr-1">
-            {(draft?.teams || []).map((t, ti) => {
-              const used = usedIds(draft);
-              return (
-                <div key={ti} className="border rounded-xl p-3">
-                  {/* Team header */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
-                    <div className="grid gap-1">
-                      <Label>Zone</Label>
-                      <Input
-                        className="h-9"
-                        value={t.zone}
-                        onChange={(e) => setTeam(ti, { zone: e.target.value })}
-                      />
-                    </div>
-                    <div className="grid gap-1">
-                      <Label>Project</Label>
-                      <select
-                        className="h-9 border rounded-md px-2"
-                        value={t.project || "HF"}
-                        onChange={(e) => setTeam(ti, { project: e.target.value })}
-                      >
-                        <option>HF</option>
-                      </select>
-                    </div>
-                    <div className="grid gap-1">
-                      <Label>Shift Type</Label>
-                      <select
-                        className="h-9 border rounded-md px-2"
-                        value={t.shiftType || "D2D"}
-                        onChange={(e) => setTeam(ti, { shiftType: e.target.value })}
-                      >
-                        <option value="D2D">Door-to-Door</option>
-                        <option value="EVENT">Events</option>
-                      </select>
-                    </div>
-                    <div className="flex items-end justify-end">
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => delTeam(ti)}
-                      >
-                        <X className="h-4 w-4 mr-1" /> Remove
-                      </Button>
-                    </div>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="whitespace-nowrap">{/* one line */}Planning</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid md:grid-cols-3 gap-4">
+            {(days || []).map((d, i) => (
+              <div key={i} className="border rounded">
+                <div className="flex items-center justify-between px-3 py-2 bg-gray-50">
+                  <div className="text-sm font-semibold whitespace-nowrap">{d.dateStr} • {d.dayStr}</div>
+                  <Button size="sm" onClick={() => setEditing(i)}>Edit</Button>
+                </div>
+                <div className="p-3">
+                  <div className="text-center font-medium">{/* Zone centered; Project removed */}{d.zone || "—"}</div>
+                  <div className="mt-2 grid grid-cols-3 text-xs text-gray-600 bg-gray-50 rounded">
+                    <div className="py-1 text-center">Shifts</div>
+                    <div className="py-1 text-center">B2s</div>
+                    <div className="py-1 text-center">B4s</div>
                   </div>
-
-                  {/* Rows */}
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-zinc-50">
-                        <tr>
-                          <th className="p-2 text-left">Recruiter</th>
-                          <th className="p-2 text-right">Hours</th>
-                          <th className="p-2 text-right">Mult</th>
-                          <th className="p-2 text-right">Score</th>
-                          <th className="p-2 text-right">B2 No</th>
-                          <th className="p-2 text-right">B2 Disc</th>
-                          <th className="p-2 text-right">B4 No</th>
-                          <th className="p-2 text-right">B4 Disc</th>
-                          <th className="p-2 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(t.rows || []).map((r, ri) => (
-                          <tr key={ri} className="border-t">
-                            <td className="p-2">
-                              <select
-                                className="h-9 border rounded-md px-2 min-w-52"
-                                value={r.recruiterId}
-                                onChange={(e) =>
-                                  setRow(ti, ri, { recruiterId: e.target.value })
-                                }
-                              >
-                                <option value="">Select…</option>
-                                {recruiters.map((rec) => {
-                                  const disabled =
-                                    used.has(rec.id) && rec.id !== r.recruiterId;
-                                  return (
-                                    <option
-                                      key={rec.id}
-                                      value={rec.id}
-                                      disabled={disabled}
-                                    >
-                                      {rec.name}
-                                      {disabled ? " (already assigned)" : ""}
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                            </td>
-
-                            <td className="p-2 text-right">
-                              <Input
-                                className="w-28 h-9 text-right"
-                                inputMode="numeric"
-                                value={r.hours ?? ""}
-                                onChange={(e) =>
-                                  setRow(ti, ri, { hours: onlyNum(e.target.value) })
-                                }
-                              />
-                            </td>
-
-                            <td className="p-2 text-right">
-                              <select
-                                className="h-9 border rounded-md px-2"
-                                value={r.commissionMult ?? ""}
-                                onChange={(e) =>
-                                  setRow(ti, ri, {
-                                    commissionMult: onlyNum(e.target.value),
-                                  })
-                                }
-                              >
-                                <option value="">—</option>
-                                <option value="1">100%</option>
-                                <option value="1.25">125%</option>
-                                <option value="1.5">150%</option>
-                                <option value="2">200%</option>
-                              </select>
-                            </td>
-
-                            <td className="p-2 text-right">
-                              <Input
-                                className="w-28 h-9 text-right"
-                                inputMode="numeric"
-                                value={r.score ?? ""}
-                                onChange={(e) =>
-                                  setRow(ti, ri, { score: onlyNum(e.target.value) })
-                                }
-                              />
-                            </td>
-                            <td className="p-2 text-right">
-                              <Input
-                                className="w-28 h-9 text-right"
-                                inputMode="numeric"
-                                value={r.box2_noDisc ?? ""}
-                                onChange={(e) =>
-                                  setRow(ti, ri, {
-                                    box2_noDisc: onlyNum(e.target.value),
-                                  })
-                                }
-                              />
-                            </td>
-                            <td className="p-2 text-right">
-                              <Input
-                                className="w-28 h-9 text-right"
-                                inputMode="numeric"
-                                value={r.box2_disc ?? ""}
-                                onChange={(e) =>
-                                  setRow(ti, ri, {
-                                    box2_disc: onlyNum(e.target.value),
-                                  })
-                                }
-                              />
-                            </td>
-                            <td className="p-2 text-right">
-                              <Input
-                                className="w-28 h-9 text-right"
-                                inputMode="numeric"
-                                value={r.box4_noDisc ?? ""}
-                                onChange={(e) =>
-                                  setRow(ti, ri, {
-                                    box4_noDisc: onlyNum(e.target.value),
-                                  })
-                                }
-                              />
-                            </td>
-                            <td className="p-2 text-right">
-                              <Input
-                                className="w-28 h-9 text-right"
-                                inputMode="numeric"
-                                value={r.box4_disc ?? ""}
-                                onChange={(e) =>
-                                  setRow(ti, ri, {
-                                    box4_disc: onlyNum(e.target.value),
-                                  })
-                                }
-                              />
-                            </td>
-                            <td className="p-2 text-right">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => delRow(ti, ri)}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="pt-2">
-                    <Button variant="outline" size="sm" onClick={() => addRow(ti)}>
-                      <Plus className="h-4 w-4 mr-1" /> Add Recruiter
-                    </Button>
+                  <div className="grid grid-cols-3">
+                    <div className="py-1 text-center">{d.recruiters?.length || 0}</div>
+                    <div className="py-1 text-center">{d.b2s ?? 0}</div>
+                    <div className="py-1 text-center">{d.b4s ?? 0}</div>
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
+        </CardContent>
+      </Card>
 
-          <div className="flex items-center justify-between mt-3">
-            <Button variant="outline" size="sm" onClick={addTeam}>
-              <Plus className="h-4 w-4 mr-1" /> Add Team
-            </Button>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={closeEdit}>
-                Cancel
-              </Button>
-              <Button style={{ background: "#d9010b", color: "white" }} onClick={saveDay}>
-                Save
-              </Button>
-            </div>
+      {/* EDIT DAY — large horizontal size via util */}
+      <Dialog open={editing != null} onOpenChange={(v) => !v && setEditing(null)}>
+        <DialogContent className={`${MODAL_SIZES.workbench.className}`}>
+          <div className={MODAL_SIZES.workbench.contentClass}>
+            <DialogHeader className="sticky top-0 bg-white/80 backdrop-blur z-10 border-b">
+              <DialogTitle>Edit Day</DialogTitle>
+            </DialogHeader>
+
+            {editing != null && (
+              <div className="p-6 space-y-6">
+                {/* Zone + B2s + B4s */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-xs text-gray-600">Zone</label>
+                    <Input
+                      value={days[editing].zone || ""}
+                      onChange={passthrough((v) => updateDayField(editing, "zone", v))}
+                      onBlur={(e) => updateDayField(editing, "zone", titleCaseFirstOnBlur(e.target.value))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-600">B2s</label>
+                    <Input
+                      inputMode="decimal"
+                      value={days[editing].b2s ?? ""}
+                      onChange={passthrough((v) => updateDayField(editing, "b2s", v))}
+                      onBlur={(e) => updateDayField(editing, "b2s", normalizeNumericOnBlur(e.target.value))}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-600">B4s</label>
+                    <Input
+                      inputMode="decimal"
+                      value={days[editing].b4s ?? ""}
+                      onChange={passthrough((v) => updateDayField(editing, "b4s", v))}
+                      onBlur={(e) => updateDayField(editing, "b4s", normalizeNumericOnBlur(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                {/* Recruiters — only appears after clicking Add Recruiter */}
+                <RecruitersBlock dayIndex={editing} day={days[editing]} updateDayField={updateDayField} />
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function RecruitersBlock({ dayIndex, day, updateDayField }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="space-y-3">
+      <Button variant="secondary" onClick={() => setShow(true)}>Add Recruiter</Button>
+      {show && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div>
+            <label className="text-xs text-gray-600">Recruiter</label>
+            <Input
+              value={day.tmpRecruiter || ""}
+              onChange={(e) => updateDayField(dayIndex, "tmpRecruiter", e.target.value)}
+              onBlur={(e) => updateDayField(dayIndex, "tmpRecruiter", titleCaseFirstOnBlur(e.target.value))}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-gray-600">Hours</label>
+            <Input
+              inputMode="decimal"
+              value={day.tmpHours ?? ""}
+              onChange={(e) => updateDayField(dayIndex, "tmpHours", e.target.value)}
+              onBlur={(e) => updateDayField(dayIndex, "tmpHours", normalizeNumericOnBlur(e.target.value))}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-gray-600">Score</label>
+            <Input
+              inputMode="decimal"
+              value={day.tmpScore ?? ""}
+              onChange={(e) => updateDayField(dayIndex, "tmpScore", e.target.value)}
+              onBlur={(e) => updateDayField(dayIndex, "tmpScore", normalizeNumericOnBlur(e.target.value))}
+            />
+          </div>
+          <div className="flex items-end">
+            <Button
+              onClick={() => {
+                const rec = {
+                  id: crypto.randomUUID(),
+                  name: day.tmpRecruiter || "",
+                  hours: Number(day.tmpHours || 0),
+                  score: Number(day.tmpScore || 0),
+                };
+                updateDayField(dayIndex, "recruiters", [...(day.recruiters || []), rec]);
+                updateDayField(dayIndex, "tmpRecruiter", "");
+                updateDayField(dayIndex, "tmpHours", "");
+                updateDayField(dayIndex, "tmpScore", "");
+              }}
+            >
+              Add
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
