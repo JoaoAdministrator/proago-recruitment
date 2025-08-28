@@ -1,10 +1,8 @@
-// Inflow.jsx — (Chat 9 base + requested changes only)
-//
-// Changes:
-// • Leads table: Source before Calls; added Date + Time columns
-// • Auto Date/Time on add (unless import provided)
-// • Phone → Mobile (prefix dropdown + number)
-// • Interview/Formation dates are independent (not linked to Lead)
+// Inflow.jsx — Chat 9 baseline + requested tweaks only
+// • Leads: add Date + Time columns; Source BEFORE Calls
+// • Auto Date/Time when adding (unless provided by import)
+// • Phone → Mobile with prefix dropdown
+// • Interview and Formation dates are independent
 
 import React, { useState } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
@@ -38,21 +36,22 @@ export default function Inflow({ leads, setLeads }) {
     setDraft(d => ({ ...d, name:"", email:"", mobileNumber:"", source:"", dateISO:"", timeHHMM:"", calls:0 }));
   };
 
-  const updateLead = (id, patch) => setLeads(prev => prev.map(l => (l.id===id?{...l, ...patch}:l)));
+  const updateLead = (id, patch) => setLeads(prev => prev.map(l => l.id===id ? { ...l, ...patch } : l));
 
   const columns = [
-    { key:"name", label:"Name" },
-    { key:"mobile", label:"Mobile" }, // was Phone
-    { key:"email", label:"Email" },
-    { key:"date", label:"Date" },
-    { key:"time", label:"Time" },
-    { key:"source", label:"Source" },
-    { key:"calls", label:"Calls" },   // Source before Calls ✅
-    { key:"actions", label:"Actions" },
+    { key: "name",   label: "Name"   },
+    { key: "mobile", label: "Mobile" }, // Phone -> Mobile
+    { key: "email",  label: "Email"  },
+    { key: "date",   label: "Date"   },
+    { key: "time",   label: "Time"   },
+    { key: "source", label: "Source" },
+    { key: "calls",  label: "Calls"  }, // Source before Calls
+    { key: "actions",label: "Actions"},
   ];
 
   return (
     <div className="space-y-6">
+      {/* Add Lead */}
       <Card>
         <CardHeader><CardTitle>Leads</CardTitle></CardHeader>
         <CardContent className="space-y-3">
@@ -78,6 +77,7 @@ export default function Inflow({ leads, setLeads }) {
               onChange={passthrough(v=>setDraft(d=>({...d,source:v})))}
               onBlur={e=>setDraft(d=>({...d,source:titleCaseFirstOnBlur(e.target.value)}))}/>
           </div>
+
           <div className="flex items-center gap-3">
             <label className="text-sm text-gray-600">Calls</label>
             <select className="border rounded-md h-10 px-2" value={String(draft.calls)}
@@ -85,11 +85,13 @@ export default function Inflow({ leads, setLeads }) {
               <option value="0">0</option><option value="1">1</option>
               <option value="2">2</option><option value="3">3</option>
             </select>
+
             <Button onClick={addLead} className="ml-auto bg-black text-white hover:opacity-90">Add Lead</Button>
           </div>
         </CardContent>
       </Card>
 
+      {/* Leads table */}
       <Card>
         <CardHeader><CardTitle>Pipeline</CardTitle></CardHeader>
         <CardContent>
@@ -147,7 +149,7 @@ export default function Inflow({ leads, setLeads }) {
                     <td className="px-3 py-2 text-center space-x-2">
                       <Button className="bg-white text-gray-800 border hover:bg-gray-50">Info</Button>
                       <Button className="border-0" style={{background:"#fca11c",color:"#000"}}
-                        onClick={()=>setLeads(prev=>prev.map(l=>l.id===lead.id?{...l,_stage:"interview"}:l))}>Move</Button>
+                        onClick={()=>updateLead(lead.id,{_stage:"interview"})}>Move</Button>
                     </td>
                   </tr>
                 ))}
@@ -157,8 +159,10 @@ export default function Inflow({ leads, setLeads }) {
         </CardContent>
       </Card>
 
-      <Stage title="Interview" leads={leads} setLeads={setLeads} stage="interview"/>
-      <Stage title="Formation" leads={leads} setLeads={setLeads} stage="formation"/>
+      {/* Interview */}
+      <Stage title="Interview" leads={leads} setLeads={setLeads} stage="interview" />
+      {/* Formation */}
+      <Stage title="Formation" leads={leads} setLeads={setLeads} stage="formation" />
     </div>
   );
 }
