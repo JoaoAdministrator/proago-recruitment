@@ -1,7 +1,9 @@
-// util.js
-// Shared helpers for Proago CRM (v2025-08-28, Chat 10 updates)
-// - monthLabel now uses full month names (e.g., August)
-
+// util.js — Proago CRM shared helpers (v2025-08-29)
+// Updates:
+// • monthLabel full names
+// • role acronyms mapping + order
+// • labels standardized: "Box 2", "Box 2*", "Box 4", "Box 4*"
+// • project display: Hello Fresh
 export const load = (k, fallback) => {
   try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }
   catch { return fallback; }
@@ -20,13 +22,12 @@ export const clone = typeof structuredClone === "function"
   ? structuredClone
   : (obj) => JSON.parse(JSON.stringify(obj));
 
-// Dates (UTC-safe)
+// Dates
 export const fmtISO = (d) => new Date(Date.UTC(
   d.getUTCFullYear?.() ?? d.getFullYear(),
   d.getUTCMonth?.() ?? d.getMonth(),
   d.getUTCDate?.() ?? d.getDate()
 )).toISOString().slice(0,10);
-
 export const addDays = (date, n) => { const d = new Date(date); d.setUTCDate(d.getUTCDate() + n); return d; };
 export const startOfWeekMon = (date = new Date()) => {
   const d = new Date(Date.UTC(
@@ -57,42 +58,54 @@ export const monthLabel = (ym) => {
 
 // Money
 export const toMoney = (n) => (Number(n || 0)).toFixed(2);
-export const avgColor = (val) => { const v = Number(val); return v >= 3 ? "#10b981" : v >= 2 ? "#fbbf24" : "#ef4444"; };
 
-// Names & phones
+// Names & phone formatting (no flags)
 export const titleCase = (s = "") =>
   s.trim().toLowerCase().replace(/\s+/g, " ").split(" ").map(w => (w ? w[0].toUpperCase() + w.slice(1) : "")).join(" ");
 
-const FLAG_BY_CC = { "+352":" ", "+33":" ", "+32":" ", "+49":" " };
-const ALLOWED_CCS = Object.keys(FLAG_BY_CC);
 const normalizeDigits = (raw="") => raw.replace(/[()\-\.\s]/g,"").replace(/^00/,"+");
+const ALLOWED_CCS = ["+352","+33","+32","+49"];
 const detectCC = (raw="") => { const s = normalizeDigits(raw); const cc = ALLOWED_CCS.find(cc => s.startsWith(cc)); return cc || ""; };
 
 export const formatPhoneByCountry = (raw = "") => {
   let s = normalizeDigits(raw);
-  if (!s.startsWith("+")) return { display: "", flag: "", cc: "", ok: false };
+  if (!s.startsWith("+")) return { display: "", cc: "", ok: false };
   const cc = detectCC(s);
-  if (!cc) return { display: "", flag: "", cc, ok: false };
-  const flag = FLAG_BY_CC[cc] || "";
+  if (!cc) return { display: "", cc, ok: false };
   let rest = s.slice(cc.length);
   if (cc === "+352") {
-    rest = rest.replace(/^(\d{3})(\d{3})(\d{3})$/, "$1 $2 $3")
-               .replace(/^(\d{3})(\d{2})(\d{3})$/, "$1 $2 $3");
+    rest = rest.replace(/(\d{3})(?=\d)/g, "$1 ").trim();
   } else if (cc === "+33" || cc === "+32") {
     rest = rest.replace(/(\d{2})(?=\d)/g, "$1 ").trim();
   } else if (cc === "+49") {
-    rest = rest.replace(/^(\d{3})(\d{3})(\d{3,})$/, "$1 $2 $3");
+    rest = rest.replace(/(\d{3})(?=\d)/g, "$1 ").trim();
   }
-  return { display: `${cc} ${rest}`.trim(), flag, cc, ok: true };
+  return { display: `${cc} ${rest}`.trim(), cc, ok: true };
 };
 
-// Settings
+// Rank mapping + order
+export const rankAcr = (role) => {
+  const map = {
+    "Branch Manager": "BM",
+    "Sales Manager": "SM",
+    "Team Captain": "TC",
+    "Pool Captain": "PC",
+    "Promoter": "PR",
+    "Rookie": "RK",
+    // already acronyms pass-through:
+    "BM":"BM","SM":"SM","TC":"TC","PC":"PC","PR":"PR","RK":"RK"
+  };
+  return map[role] || role || "RK";
+};
+export const rankOrderVal = (acronym) => ({ BM:6, SM:5, TC:4, PC:3, PR:2, RK:1 }[acronym] || 0);
+
+// Settings defaults (Hello Fresh)
 export const DEFAULT_SETTINGS = {
-  projects: ["HF"],
+  projects: ["Hello Fresh"],
   conversionType: {
     D2D: {
-      noDiscount: { box2: 95,  box4: 125 },
-      discount:   { box2: 80,  box4: 110 },
+      noDiscount: { box2: 95,  box4: 125 }, // "Box 2", "Box 4"
+      discount:   { box2: 80,  box4: 110 }, // "Box 2*", "Box 4*"
     },
     EVENT: {
       noDiscount: { box2: 60,  box4: 70 },
@@ -104,6 +117,7 @@ export const DEFAULT_SETTINGS = {
     { startISO: "2025-05-01", rate: 15.6265 },
   ],
 };
+
 export const rateForDate = (settings, iso) => {
   const bands = [...(settings?.rateBands || [])].sort((a,b)=> a.startISO < b.startISO ? 1 : -1);
   const d = iso || fmtISO(new Date());
@@ -111,7 +125,7 @@ export const rateForDate = (settings, iso) => {
   return band.rate;
 };
 
-// Performance
+// History helpers for recruiters metrics
 export const isWithinLastWeeks = (iso, weeks = 8) => {
   const [y,m,d]=iso.split("-").map(Number);
   const row = new Date(Date.UTC(y, m-1, d));
@@ -141,9 +155,3 @@ export const boxPercentsLast8w = (history, recruiterId) => {
   const pct = (n, d) => (d > 0 ? (n / d) * 100 : 0);
   return { b2: pct(totals.b2, totals.sales), b4: pct(totals.b4, totals.sales) };
 };
-
-// Role defaults
-export const roleHoursDefault = (role) =>
-  role === "Pool Captain" ? 7 : (role === "Team Captain" || role === "Sales Manager") ? 8 : 6;
-export const roleMultiplierDefault = (role) =>
-  role === "Pool Captain" ? 1.25 : role === "Team Captain" ? 1.5 : role === "Sales Manager" ? 2.0 : 1.0;
