@@ -1,9 +1,10 @@
 // Planning.jsx
-// Proago CRM (v2025-08-28 • Chat 10 updates)
-// - Remove "No shifts yet" placeholder
-// - Edit Day: rows table appears only after "Add Recruiter"
-// - Dialog wider horizontally
-// - Day preview: center zone; remove project; date/day header gray; keep one-line week badge via App Shell change
+// Proago CRM (Chat 10) — Wider Edit Day + Expanded inner table columns
+// - Dialog: w-[95vw] max-w-[1600px] h-[90vh]
+// - Inner table uses table-fixed + colgroup to spread space proportionally
+// - Rows table only appears after "Add Recruiter" (no empty form fields)
+// - Day preview header gray; zone centered; project removed from preview
+// - One-line "Week N" badge handled via whitespace-nowrap
 
 import React, { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
@@ -38,8 +39,13 @@ const upsertHistory = (list, row) => {
   return Array.from(map.values());
 };
 
-// numeric sanitizer
-const onlyNum = (s) => { const t = String(s ?? ""); if (t === "") return ""; const m = t.match(/^\d+$/); return m ? t : t.replace(/\D+/g, ""); };
+// numeric sanitizer (keeps "", or digits only)
+const onlyNum = (s) => {
+  const t = String(s ?? "");
+  if (t === "") return "";
+  const m = t.match(/^\d+$/);
+  return m ? t : t.replace(/\D+/g, "");
+};
 
 export default function Planning({ recruiters, planning, setPlanning, history, setHistory }) {
   const [weekStart, setWeekStart] = useState(() => fmtISO(startOfWeekMon(new Date())));
@@ -89,44 +95,73 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
 
   const usedIds = (d) => {
     const s = new Set();
-    (d?.teams || []).forEach((t) => (t.rows || []).forEach((r) => r.recruiterId && s.add(r.recruiterId)));
+    (d?.teams || []).forEach((t) =>
+      (t.rows || []).forEach((r) => r.recruiterId && s.add(r.recruiterId))
+    );
     return s;
   };
 
-  const addTeam = () => setDraft((d) => ({ ...d, teams: [...(d?.teams || []), { zone: "", project: "HF", shiftType: "D2D", rows: [] }] }));
-  const delTeam = (ti) => setDraft((d) => ({ ...d, teams: (d?.teams || []).filter((_, i) => i !== ti) }));
-  const setTeam = (ti, patch) => setDraft((d) => { const teams = clone(d.teams || []); teams[ti] = { ...teams[ti], ...patch }; return { ...d, teams }; });
+  const addTeam = () =>
+    setDraft((d) => ({
+      ...d,
+      teams: [...(d?.teams || []), { zone: "", project: "HF", shiftType: "D2D", rows: [] }],
+    }));
 
-  const addRow = (ti) => setDraft((d) => {
-    const teams = clone(d.teams || []);
-    const nextKey = teams[ti].rows?.length || 0;
-    (teams[ti].rows ||= []).push({
-      _rowKey: nextKey,
-      recruiterId: "",
-      hours: "",
-      commissionMult: "",
-      score: "",
-      box2_noDisc: "",
-      box2_disc: "",
-      box4_noDisc: "",
-      box4_disc: "",
+  const delTeam = (ti) =>
+    setDraft((d) => ({
+      ...d,
+      teams: (d?.teams || []).filter((_, i) => i !== ti),
+    }));
+
+  const setTeam = (ti, patch) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      teams[ti] = { ...teams[ti], ...patch };
+      return { ...d, teams };
     });
-    return { ...d, teams };
-  });
-  const delRow = (ti, ri) => setDraft((d) => { const teams = clone(d.teams || []); teams[ti].rows = (teams[ti].rows || []).filter((_, i) => i !== ri); return { ...d, teams }; });
 
-  const setRow = (ti, ri, patch) => setDraft((d) => {
-    const teams = clone(d.teams || []);
-    const prevRow = teams[ti].rows[ri];
-    const nextRow = { ...prevRow, ...patch };
-    if (patch.recruiterId) {
-      const ids = usedIds({ teams });
-      const already = ids.has(patch.recruiterId) && prevRow.recruiterId !== patch.recruiterId;
-      if (already) { alert("This recruiter is already assigned today."); return d; }
-    }
-    teams[ti].rows[ri] = nextRow;
-    return { ...d, teams };
-  });
+  const addRow = (ti) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      const nextKey = teams[ti].rows?.length || 0;
+      (teams[ti].rows ||= []).push({
+        _rowKey: nextKey,
+        recruiterId: "",
+        hours: "",
+        commissionMult: "",
+        score: "",
+        box2_noDisc: "",
+        box2_disc: "",
+        box4_noDisc: "",
+        box4_disc: "",
+      });
+      return { ...d, teams };
+    });
+
+  const delRow = (ti, ri) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      teams[ti].rows = (teams[ti].rows || []).filter((_, i) => i !== ri);
+      return { ...d, teams };
+    });
+
+  const setRow = (ti, ri, patch) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      const prevRow = teams[ti].rows[ri];
+      const nextRow = { ...prevRow, ...patch };
+      if (patch.recruiterId) {
+        const ids = usedIds({ teams });
+        const already =
+          ids.has(patch.recruiterId) && prevRow.recruiterId !== patch.recruiterId;
+        if (already) {
+          alert("This recruiter is already assigned today.");
+          return d;
+        }
+      }
+      teams[ti].rows[ri] = nextRow;
+      return { ...d, teams };
+    });
 
   const saveDay = () => {
     if (!draft) return;
@@ -134,8 +169,15 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
     for (const t of draft.teams || []) {
       for (const r of t.rows || []) {
         const sc = Number(r.score || 0);
-        const sum = Number(r.box2_noDisc || 0) + Number(r.box2_disc || 0) + Number(r.box4_noDisc || 0) + Number(r.box4_disc || 0);
-        if (sum > sc) { alert("Box2/Box4 totals cannot exceed Score."); return; }
+        const sum =
+          Number(r.box2_noDisc || 0) +
+          Number(r.box2_disc || 0) +
+          Number(r.box4_noDisc || 0) +
+          Number(r.box4_disc || 0);
+        if (sum > sc) {
+          alert("Box2/Box4 totals cannot exceed Score.");
+          return;
+        }
       }
     }
     // write planning
@@ -145,7 +187,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
       next[weekStart].days[iso] = clone(draft);
       return next;
     });
-    // write history
+    // write history (upsert)
     setHistory((prev) => {
       let out = [...prev];
       (draft.teams || []).forEach((t) => {
@@ -155,16 +197,20 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
             _rowKey: r._rowKey ?? i,
             dateISO: iso,
             recruiterId: r.recruiterId,
-            recruiterName: recruiters.find((x) => x.id === r.recruiterId)?.name || "",
+            recruiterName:
+              recruiters.find((x) => x.id === r.recruiterId)?.name || "",
             location: t.zone || "",
             project: t.project || "HF",
             shiftType: t.shiftType || "D2D",
             hours: r.hours === "" ? undefined : Number(r.hours),
-            commissionMult: r.commissionMult === "" ? undefined : Number(r.commissionMult),
+            commissionMult:
+              r.commissionMult === "" ? undefined : Number(r.commissionMult),
             score: r.score === "" ? undefined : Number(r.score),
-            box2_noDisc: r.box2_noDisc === "" ? undefined : Number(r.box2_noDisc),
+            box2_noDisc:
+              r.box2_noDisc === "" ? undefined : Number(r.box2_noDisc),
             box2_disc: r.box2_disc === "" ? undefined : Number(r.box2_disc),
-            box4_noDisc: r.box4_noDisc === "" ? undefined : Number(r.box4_noDisc),
+            box4_noDisc:
+              r.box4_noDisc === "" ? undefined : Number(r.box4_noDisc),
             box4_disc: r.box4_disc === "" ? undefined : Number(r.box4_disc),
           });
         });
@@ -174,6 +220,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
     closeEdit();
   };
 
+  /* ---------- Day Card (preview) ---------- */
   const DayCard = ({ i }) => {
     const dISO = fmtISO(addDays(new Date(weekStart), i));
     const day = dayData(dISO);
@@ -191,10 +238,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
         <CardContent className="grid gap-3 pt-0">
           {(day.teams || []).map((t, ti) => (
             <div key={ti} className="border rounded-lg p-2">
-              <div className="font-medium text-center">
-                {t.zone || "—"}
-              </div>
-
+              <div className="font-medium text-center">{t.zone || "—"}</div>
               {(t.rows || []).length ? (
                 <ul className="text-sm space-y-1 mt-1">
                   {t.rows.map((r, ri) => {
@@ -203,7 +247,10 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                     return (
                       <li key={ri} className="flex items-center justify-between">
                         <span>{rec?.name || ""}</span>
-                        <span className="text-base font-medium" style={{ color: sc !== "" ? scoreColor(sc) : undefined }}>
+                        <span
+                          className="text-base font-medium"
+                          style={{ color: sc !== "" ? scoreColor(sc) : undefined }}
+                        >
                           {sc !== "" ? sc : ""}
                         </span>
                       </li>
@@ -224,16 +271,25 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
     );
   };
 
+  /* ---------- Render ---------- */
   return (
     <div className="grid gap-4">
       {/* Week header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setWeekStart(fmtISO(addDays(new Date(weekStart), -7)))}>
+          <Button
+            variant="outline"
+            onClick={() => setWeekStart(fmtISO(addDays(new Date(weekStart), -7)))}
+          >
             <ChevronLeft className="h-4 w-4" /> Prev
           </Button>
-          <Badge style={{ background: "#fca11c" }} className="whitespace-nowrap">Week {weekNum}</Badge>
-          <Button variant="outline" onClick={() => setWeekStart(fmtISO(addDays(new Date(weekStart), 7)))}>
+          <Badge style={{ background: "#fca11c" }} className="whitespace-nowrap">
+            Week {weekNum}
+          </Badge>
+          <Button
+            variant="outline"
+            onClick={() => setWeekStart(fmtISO(addDays(new Date(weekStart), 7)))}
+          >
             Next <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
@@ -241,14 +297,17 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
 
       {/* Days grid */}
       <div className="grid gap-4 grid-cols-1 md:grid-cols-3 xl:grid-cols-7">
-        {Array.from({ length: 7 }).map((_, i) => (<DayCard key={i} i={i} />))}
+        {Array.from({ length: 7 }).map((_, i) => (
+          <DayCard key={i} i={i} />
+        ))}
       </div>
 
-      {/* Full-screen Edit Day */}
+      {/* Edit Day (BIGGER horizontally) */}
       <Dialog open={!!editDateISO} onOpenChange={(open) => !open && closeEdit()}>
-        {/* wider horizontally */}
-        <DialogContent className="max-w-[1400px] w-[98vw] h-[90vh] p-4">
-          <DialogHeader><DialogTitle>Edit Day — {fmtUK(editDateISO || "")}</DialogTitle></DialogHeader>
+        <DialogContent className="w-[95vw] max-w-[1600px] h-[90vh] p-4">
+          <DialogHeader>
+            <DialogTitle>Edit Day — {fmtUK(editDateISO || "")}</DialogTitle>
+          </DialogHeader>
 
           <div className="grid gap-3 h-[calc(90vh-5rem)] overflow-y-auto pr-1">
             {(draft?.teams || []).map((t, ti) => {
@@ -260,32 +319,60 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
                     <div className="grid gap-1">
                       <Label>Zone</Label>
-                      <Input className="h-9" value={t.zone} onChange={(e) => setTeam(ti, { zone: e.target.value })} />
+                      <Input
+                        className="h-9"
+                        value={t.zone}
+                        onChange={(e) => setTeam(ti, { zone: e.target.value })}
+                      />
                     </div>
                     <div className="grid gap-1">
                       <Label>Project</Label>
-                      <select className="h-9 border rounded-md px-2" value={t.project || "HF"} onChange={(e) => setTeam(ti, { project: e.target.value })}>
+                      <select
+                        className="h-9 border rounded-md px-2"
+                        value={t.project || "HF"}
+                        onChange={(e) => setTeam(ti, { project: e.target.value })}
+                      >
                         <option>HF</option>
                       </select>
                     </div>
                     <div className="grid gap-1">
                       <Label>Shift Type</Label>
-                      <select className="h-9 border rounded-md px-2" value={t.shiftType || "D2D"} onChange={(e) => setTeam(ti, { shiftType: e.target.value })}>
+                      <select
+                        className="h-9 border rounded-md px-2"
+                        value={t.shiftType || "D2D"}
+                        onChange={(e) => setTeam(ti, { shiftType: e.target.value })}
+                      >
                         <option value="D2D">Door-to-Door</option>
                         <option value="EVENT">Events</option>
                       </select>
                     </div>
                     <div className="flex items-end justify-end">
-                      <Button variant="destructive" size="sm" onClick={() => delTeam(ti)}>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => delTeam(ti)}
+                      >
                         <X className="h-4 w-4 mr-1" /> Remove
                       </Button>
                     </div>
                   </div>
 
-                  {/* Rows: only render table if at least one recruiter row */}
+                  {/* Rows: render only if at least one row exists */}
                   {hasRows ? (
                     <div className="overflow-x-auto">
-                      <table className="min-w-full text-sm">
+                      <table className="min-w-full text-sm table-fixed">
+                        {/* Use colgroup to allocate width proportionally on the wider dialog */}
+                        <colgroup>
+                          <col style={{ width: "28%" }} /> {/* Recruiter */}
+                          <col style={{ width: "9%" }} />  {/* Hours */}
+                          <col style={{ width: "10%" }} /> {/* Mult */}
+                          <col style={{ width: "9%" }} />  {/* Score */}
+                          <col style={{ width: "11%" }} /> {/* B2 No */}
+                          <col style={{ width: "11%" }} /> {/* B2 Disc */}
+                          <col style={{ width: "11%" }} /> {/* B4 No */}
+                          <col style={{ width: "11%" }} /> {/* B4 Disc */}
+                          <col style={{ width: "10%" }} /> {/* Actions */}
+                        </colgroup>
                         <thead className="bg-zinc-50">
                           <tr>
                             <th className="p-2 text-left">Recruiter</th>
@@ -303,22 +390,52 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                           {(t.rows || []).map((r, ri) => (
                             <tr key={ri} className="border-t">
                               <td className="p-2">
-                                <select className="h-9 border rounded-md px-2 min-w-52" value={r.recruiterId}
-                                  onChange={(e) => setRow(ti, ri, { recruiterId: e.target.value })}>
+                                <select
+                                  className="h-9 border rounded-md px-2 w-full min-w-[16rem]"
+                                  value={r.recruiterId}
+                                  onChange={(e) =>
+                                    setRow(ti, ri, { recruiterId: e.target.value })
+                                  }
+                                >
                                   <option value="">Select…</option>
                                   {recruiters.map((rec) => {
-                                    const disabled = used.has(rec.id) && rec.id !== r.recruiterId;
-                                    return (<option key={rec.id} value={rec.id} disabled={disabled}>{rec.name}{disabled ? " (already assigned)" : ""}</option>);
+                                    const disabled =
+                                      used.has(rec.id) && rec.id !== r.recruiterId;
+                                    return (
+                                      <option
+                                        key={rec.id}
+                                        value={rec.id}
+                                        disabled={disabled}
+                                      >
+                                        {rec.name}
+                                        {disabled ? " (already assigned)" : ""}
+                                      </option>
+                                    );
                                   })}
                                 </select>
                               </td>
+
                               <td className="p-2 text-right">
-                                <Input className="w-28 h-9 text-right" inputMode="numeric" value={r.hours ?? ""}
-                                  onChange={(e) => setRow(ti, ri, { hours: onlyNum(e.target.value) })} />
+                                <Input
+                                  className="w-full h-9 text-right"
+                                  inputMode="numeric"
+                                  value={r.hours ?? ""}
+                                  onChange={(e) =>
+                                    setRow(ti, ri, { hours: onlyNum(e.target.value) })
+                                  }
+                                />
                               </td>
+
                               <td className="p-2 text-right">
-                                <select className="h-9 border rounded-md px-2" value={r.commissionMult ?? ""}
-                                  onChange={(e) => setRow(ti, ri, { commissionMult: onlyNum(e.target.value) })}>
+                                <select
+                                  className="h-9 border rounded-md px-2 w-full"
+                                  value={r.commissionMult ?? ""}
+                                  onChange={(e) =>
+                                    setRow(ti, ri, {
+                                      commissionMult: onlyNum(e.target.value),
+                                    })
+                                  }
+                                >
                                   <option value="">—</option>
                                   <option value="1">100%</option>
                                   <option value="1.25">125%</option>
@@ -326,28 +443,76 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                                   <option value="2">200%</option>
                                 </select>
                               </td>
+
                               <td className="p-2 text-right">
-                                <Input className="w-28 h-9 text-right" inputMode="numeric" value={r.score ?? ""}
-                                  onChange={(e) => setRow(ti, ri, { score: onlyNum(e.target.value) })} />
+                                <Input
+                                  className="w-full h-9 text-right"
+                                  inputMode="numeric"
+                                  value={r.score ?? ""}
+                                  onChange={(e) =>
+                                    setRow(ti, ri, { score: onlyNum(e.target.value) })
+                                  }
+                                />
                               </td>
+
                               <td className="p-2 text-right">
-                                <Input className="w-28 h-9 text-right" inputMode="numeric" value={r.box2_noDisc ?? ""}
-                                  onChange={(e) => setRow(ti, ri, { box2_noDisc: onlyNum(e.target.value) })} />
+                                <Input
+                                  className="w-full h-9 text-right"
+                                  inputMode="numeric"
+                                  value={r.box2_noDisc ?? ""}
+                                  onChange={(e) =>
+                                    setRow(ti, ri, {
+                                      box2_noDisc: onlyNum(e.target.value),
+                                    })
+                                  }
+                                />
                               </td>
+
                               <td className="p-2 text-right">
-                                <Input className="w-28 h-9 text-right" inputMode="numeric" value={r.box2_disc ?? ""}
-                                  onChange={(e) => setRow(ti, ri, { box2_disc: onlyNum(e.target.value) })} />
+                                <Input
+                                  className="w-full h-9 text-right"
+                                  inputMode="numeric"
+                                  value={r.box2_disc ?? ""}
+                                  onChange={(e) =>
+                                    setRow(ti, ri, {
+                                      box2_disc: onlyNum(e.target.value),
+                                    })
+                                  }
+                                />
                               </td>
+
                               <td className="p-2 text-right">
-                                <Input className="w-28 h-9 text-right" inputMode="numeric" value={r.box4_noDisc ?? ""}
-                                  onChange={(e) => setRow(ti, ri, { box4_noDisc: onlyNum(e.target.value) })} />
+                                <Input
+                                  className="w-full h-9 text-right"
+                                  inputMode="numeric"
+                                  value={r.box4_noDisc ?? ""}
+                                  onChange={(e) =>
+                                    setRow(ti, ri, {
+                                      box4_noDisc: onlyNum(e.target.value),
+                                    })
+                                  }
+                                />
                               </td>
+
                               <td className="p-2 text-right">
-                                <Input className="w-28 h-9 text-right" inputMode="numeric" value={r.box4_disc ?? ""}
-                                  onChange={(e) => setRow(ti, ri, { box4_disc: onlyNum(e.target.value) })} />
+                                <Input
+                                  className="w-full h-9 text-right"
+                                  inputMode="numeric"
+                                  value={r.box4_disc ?? ""}
+                                  onChange={(e) =>
+                                    setRow(ti, ri, {
+                                      box4_disc: onlyNum(e.target.value),
+                                    })
+                                  }
+                                />
                               </td>
+
                               <td className="p-2 text-right">
-                                <Button variant="outline" size="sm" onClick={() => delRow(ti, ri)}>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => delRow(ti, ri)}
+                                >
                                   <X className="h-4 w-4" />
                                 </Button>
                               </td>
