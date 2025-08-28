@@ -1,79 +1,315 @@
-// Wages.jsx — Chat 9 baseline + requested tweaks only
-// • Top table = Name | Hours Wages | Bonus Wages | Total Pay | Actions
-// • Remove Crewcode & Rank from the top table
-// • No standalone Hours column
-// • (Rest left as-is)
+// Wages.jsx
+// Proago CRM — Wages page (v2025-08-28, Chat 9)
+// Shows Hours, Wages, Bonus, and Total Pay per recruiter with breakdowns + CSV export.
 
 import React, { useMemo, useState } from "react";
-import { Card, CardHeader, CardTitle, CardContent } from "../components/ui/card";
-import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
+import { Label } from "../components/ui/label";
+import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 
-export default function Wages({ recruiters = [], payouts = [], setPayouts }) {
-  const [query, setQuery] = useState("");
+import {
+  load, K, DEFAULT_SETTINGS, rateForDate,
+  monthKey, monthLabel, toMoney
+} from "../util";
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return recruiters;
-    return recruiters.filter(r => String(r.name||"").toLowerCase().includes(q));
-  }, [recruiters, query]);
+// Commission table for Box2 (rookie baseline)
+const rookieCommission = (box2) => {
+  const t = {0:0,1:0,2:25,3:40,4:70,5:85,6:120,7:135,8:175,9:190,10:235};
+  if (box2 <= 10) return t[box2] ?? 0;
+  return 235 + (box2 - 10) * 15;
+};
+
+// Role defaults (fallback if shift.hours missing)
+const roleHoursDefault = (role) =>
+  role === "Pool Captain" ? 7 : (role === "Team Captain" || role === "Sales Manager") ? 8 : 6;
+
+const roleMultiplierDefault = (role) =>
+  role === "Pool Captain" ? 1.25 : role === "Team Captain" ? 1.5 : role === "Sales Manager" ? 2.0 : 1.0;
+
+// Helpers
+const prevMonthKey = (ym) => {
+  const [Y, M] = ym.split("-").map(Number);
+  const d = new Date(Date.UTC(Y, M - 1, 1));
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+const currentMonthKey = () => {
+  const d = new Date();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+
+export default function Wages({ recruiters, history }) {
+  const [payMonth, setPayMonth] = useState(currentMonthKey());
+  const [status, setStatus] = useState("all");
+  const [open, setOpen] = useState({}); // recruiterId => bool
+
+  // Reference months:
+  // - Wages = previous month relative to payday
+  // - Bonus = month before wages month
+  const wagesMonth = useMemo(() => prevMonthKey(payMonth), [payMonth]);
+  const bonusMonth = useMemo(() => prevMonthKey(wagesMonth), [wagesMonth]);
+
+  // Load settings to read hourly rate bands
+  const settings = load(K.settings, DEFAULT_SETTINGS);
+
+  const inMonth = (iso, ym) => monthKey(iso) === ym;
+
+  // Build table rows per recruiter
+  const rows = useMemo(() => {
+    return recruiters
+      .filter(r => status === "all" ? true : status === "active" ? !r.isInactive : !!r.isInactive)
+      .map(r => {
+        // Wages month rows (hours * rate)
+        const wageShifts = history
+          .filter(h => h.recruiterId === r.id && inMonth(h.dateISO || h.date, wagesMonth))
+          .map(h => {
+            const hrs = (h.hours != null && h.hours !== "") ? Number(h.hours) : roleHoursDefault(h.roleAtShift || r.role || "Rookie");
+            const rate = rateForDate(settings, h.dateISO || h.date);
+            const wages = hrs * rate;
+            return {
+              dateISO: h.dateISO || h.date,
+              location: h.location || "—",
+              hrs,
+              rate,
+              wages,
+            };
+          });
+
+        const hours = wageShifts.reduce((s, x) => s + (Number.isFinite(x.hrs) ? x.hrs : 0), 0);
+        const wages = wageShifts.reduce((s, x) => s + (Number.isFinite(x.wages) ? x.wages : 0), 0);
+
+        // Bonus month rows (commission based on Box2 and multiplier)
+        const bonusShifts = history
+          .filter(h => h.recruiterId === r.id && inMonth(h.dateISO || h.date, bonusMonth))
+          .map(h => {
+            const box2 = (Number(h.box2_noDisc) || 0) + (Number(h.box2_disc) || 0);
+            const mult = (h.commissionMult != null && h.commissionMult !== "") ? Number(h.commissionMult) : roleMultiplierDefault(h.roleAtShift || r.role || "Rookie");
+            const base = rookieCommission(box2);
+            const bonus = base * mult;
+            return {
+              dateISO: h.dateISO || h.date,
+              location: h.location || "—",
+              box2,
+              mult,
+              bonus,
+            };
+          });
+
+        const bonus = bonusShifts.reduce((s, x) => s + (Number.isFinite(x.bonus) ? x.bonus : 0), 0);
+
+        const rolesWorked = Array.from(
+          new Set(
+            history
+              .filter(h => h.recruiterId === r.id && inMonth(h.dateISO || h.date, wagesMonth))
+              .map(h => h.roleAtShift || r.role || "Rookie")
+          )
+        );
+
+        return {
+          recruiter: r,
+          rolesWorked,
+          hours,
+          wages,
+          bonus,
+          wageShifts,
+          bonusShifts
+        };
+      });
+  }, [recruiters, history, status, settings, wagesMonth, bonusMonth]);
+
+  const monthShift = (delta) => {
+    const [y, m] = payMonth.split("-").map(Number);
+    const d = new Date(Date.UTC(y, m - 1, 1));
+    d.setUTCMonth(d.getUTCMonth() + delta);
+    setPayMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+  };
+
+  const exportCSV = () => {
+    const hdr = [
+      "Name",
+      "Crewcode",
+      "Role(s)",
+      `Hours (${monthLabel(wagesMonth)})`,
+      `Wages € (${monthLabel(wagesMonth)})`,
+      `Bonus € (${monthLabel(bonusMonth)})`,
+      "Total Pay €"
+    ];
+    const lines = [hdr.join(",")];
+    rows.forEach(({ recruiter: r, rolesWorked, hours, wages, bonus }) => {
+      const total = wages + bonus;
+      lines.push([
+        `"${r.name}"`,
+        `"${r.crewCode || ""}"`,
+        `"${rolesWorked.join("/") || r.role || "Rookie"}"`,
+        hours,
+        toMoney(wages),
+        toMoney(bonus),
+        toMoney(total)
+      ].join(","));
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `wages_${payMonth}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
-    <Card>
-      <CardHeader className="flex items-center justify-between">
-        <CardTitle>Pay</CardTitle>
-        <Input placeholder="Search by Name" value={query} onChange={e=>setQuery(e.target.value)} className="max-w-sm"/>
-      </CardHeader>
-
-      <CardContent>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="text-left">
-                <th className="px-3 py-2 text-center text-xs text-gray-600">Name</th>
-                <th className="px-3 py-2 text-center text-xs text-gray-600">Hours Wages</th>
-                <th className="px-3 py-2 text-center text-xs text-gray-600">Bonus Wages</th>
-                <th className="px-3 py-2 text-center text-xs text-gray-600">Total Pay</th>
-                <th className="px-3 py-2 text-center text-xs text-gray-600">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(r=>{
-                const p = payouts.find(x=>x.recruiterId===r.id) || {};
-                const hoursWages = Number(p.hoursWages||0);
-                const bonusWages = Number(p.bonusWages||0);
-                const total = hoursWages + bonusWages;
-
-                return (
-                  <tr key={r.id} className="border-t">
-                    <td className="px-3 py-2 text-center">{r.name}</td>
-                    <td className="px-3 py-2 text-center">
-                      <Input inputMode="decimal" value={p.hoursWages??""}
-                        onChange={e=>setPayouts(prev=>up(prev,r.id,"hoursWages",e.target.value))}
-                        onBlur={e=>setPayouts(prev=>up(prev,r.id,"hoursWages",cleanNum(e.target.value)))}/>
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <Input inputMode="decimal" value={p.bonusWages??""}
-                        onChange={e=>setPayouts(prev=>up(prev,r.id,"bonusWages",e.target.value))}
-                        onBlur={e=>setPayouts(prev=>up(prev,r.id,"bonusWages",cleanNum(e.target.value)))}/>
-                    </td>
-                    <td className="px-3 py-2 text-center font-semibold">{total.toFixed(2)}</td>
-                    <td className="px-3 py-2 text-center"><Button variant="secondary">Details</Button></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+    <div className="grid gap-4">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div className="flex gap-2 items-center">
+          <Button variant="outline" onClick={() => monthShift(-1)}>
+            <ChevronLeft className="h-4 w-4" /> Prev
+          </Button>
+          <Badge style={{ background: "#fca11c" }}>
+            Payday 15 {monthLabel(payMonth)}
+          </Badge>
+          <Button variant="outline" onClick={() => monthShift(1)}>
+            Next <ChevronRight className="h-4 w-4" />
+          </Button>
         </div>
-      </CardContent>
-    </Card>
+        <div className="flex gap-2 items-center">
+          <Label>Status</Label>
+          <select
+            className="h-10 border rounded-md px-2"
+            value={status}
+            onChange={(e) => setStatus(e.target.value)}
+          >
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="all">All</option>
+          </select>
+          <Button onClick={exportCSV}>Export CSV</Button>
+        </div>
+      </div>
+
+      <div className="text-sm text-muted-foreground">
+        <span>Wages from <b>{monthLabel(wagesMonth)}</b></span>
+        {" • "}
+        <span>Bonus from <b>{monthLabel(bonusMonth)}</b></span>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-x-auto border rounded-xl">
+        <table className="min-w-full text-sm">
+          <thead className="bg-zinc-50">
+            <tr>
+              <th className="p-3 text-left">Name</th>
+              <th className="p-3 text-left">Crewcode</th>
+              <th className="p-3 text-left">Role(s)</th>
+              <th className="p-3 text-right">Hours</th>
+              <th className="p-3 text-right">Wages €</th>
+              <th className="p-3 text-right">Bonus €</th>
+              <th className="p-3 text-right">Total Pay €</th>
+              <th className="p-3 text-right">Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ recruiter: r, rolesWorked, hours, wages, bonus, wageShifts, bonusShifts }) => {
+              const total = wages + bonus;
+              return (
+                <React.Fragment key={r.id}>
+                  <tr className="border-t">
+                    <td className="p-3 font-medium">{r.name}</td>
+                    <td className="p-3">{r.crewCode}</td>
+                    <td className="p-3">{rolesWorked.join("/") || r.role || "Rookie"}</td>
+                    <td className="p-3 text-right">{hours}</td>
+                    <td className="p-3 text-right">{toMoney(wages)}</td>
+                    <td className="p-3 text-right">{toMoney(bonus)}</td>
+                    <td className="p-3 text-right font-medium">{toMoney(total)}</td>
+                    <td className="p-3 text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setOpen(o => ({ ...o, [r.id]: !o[r.id] }))}
+                      >
+                        {open[r.id] ? "Hide" : "View"} <ChevronDown className="h-4 w-4 ml-1" />
+                      </Button>
+                    </td>
+                  </tr>
+
+                  {open[r.id] && (
+                    <tr>
+                      <td colSpan={8} className="p-0">
+                        <div className="px-3 pb-3">
+                          <div className="grid md:grid-cols-2 gap-3">
+                            {/* Wages breakdown */}
+                            <div className="border rounded-lg overflow-hidden">
+                              <div className="px-3 py-2 bg-zinc-50 font-medium">
+                                Wages — {monthLabel(wagesMonth)}
+                              </div>
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full text-sm">
+                                  <thead className="bg-zinc-50">
+                                    <tr>
+                                      <th className="p-2 text-left">Date</th>
+                                      <th className="p-2 text-left">Location</th>
+                                      <th className="p-2 text-right">Hours</th>
+                                      <th className="p-2 text-right">Rate</th>
+                                      <th className="p-2 text-right">Wages</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {wageShifts.map((s, i) => (
+                                      <tr key={i} className="border-t">
+                                        <td className="p-2">{(s.dateISO || "").slice(8,10)}/{(s.dateISO || "").slice(5,7)}/{(s.dateISO || "").slice(2,4)}</td>
+                                        <td className="p-2">{s.location}</td>
+                                        <td className="p-2 text-right">{s.hrs}</td>
+                                        <td className="p-2 text-right">{toMoney(s.rate)}</td>
+                                        <td className="p-2 text-right">{toMoney(s.wages)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                            {/* Bonus breakdown */}
+                            <div className="border rounded-lg overflow-hidden">
+                              <div className="px-3 py-2 bg-zinc-50 font-medium">
+                                Bonus — {monthLabel(bonusMonth)}
+                              </div>
+                              <div className="overflow-x-auto">
+                                <table className="min-w-full text-sm">
+                                  <thead className="bg-zinc-50">
+                                    <tr>
+                                      <th className="p-2 text-left">Date</th>
+                                      <th className="p-2 text-left">Location</th>
+                                      <th className="p-2 text-right">Box2</th>
+                                      <th className="p-2 text-right">Mult</th>
+                                      <th className="p-2 text-right">Bonus</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {bonusShifts.map((s, i) => (
+                                      <tr key={i} className="border-t">
+                                        <td className="p-2">{(s.dateISO || "").slice(8,10)}/{(s.dateISO || "").slice(5,7)}/{(s.dateISO || "").slice(2,4)}</td>
+                                        <td className="p-2">{s.location}</td>
+                                        <td className="p-2 text-right">{s.box2}</td>
+                                        <td className="p-2 text-right">{(s.mult || 1).toFixed(2)}×</td>
+                                        <td className="p-2 text-right">{toMoney(s.bonus)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
-
-function up(prev, recruiterId, key, value){
-  const next=[...prev]; const i=next.findIndex(x=>x.recruiterId===recruiterId);
-  if (i===-1) next.push({ recruiterId, [key]: value });
-  else next[i] = { ...next[i], [key]: value };
-  return next;
-}
-function cleanNum(v){ const s=String(v||"").replace(/[^\d.]/g,""); const parts=s.split("."); return parts.length>1?`${parts[0]}.${parts.slice(1).join("").replace(/\./g,"")}`:s; }
