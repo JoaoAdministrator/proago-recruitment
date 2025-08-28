@@ -1,4 +1,4 @@
-// util.js — Proago CRM (Final Sync Build v2025-08-28b)
+// util.js — Proago CRM (Final Sync Build v2025-08-28b+patch)
 //
 // • Brand colors
 // • LocalStorage helpers (load/save)
@@ -9,6 +9,7 @@
 // • Input helpers to prevent the one-letter typing bug
 // • Phone prefixes
 // • Shared modal/workbench size for large dialogs
+// • NEW: avgColor, boxPercentsLast8w, last5ScoresFor  ✅
 
 /* -------------------- Brand -------------------- */
 export const BRAND = {
@@ -46,8 +47,6 @@ export function save(key, value) {
 }
 
 /* -------------------- Defaults / Settings -------------------- */
-// Conversion prices (Income) for D2D/Event and discount/no-discount.
-// Adjust freely in Settings page; these are safe fallbacks.
 export const DEFAULT_SETTINGS = {
   hourlyRateBands: [
     { effectiveFrom: "2025-01-01", rate: 15 },
@@ -89,7 +88,6 @@ export function fmtUK(isoOrDate) {
 
 // Full month label, e.g., "August 2025"
 export function monthFull(isoYearMonth) {
-  // accepts "YYYY-MM" or any date-like ISO
   let y = 0, m = 0;
   if (/^\d{4}-\d{2}$/.test(isoYearMonth)) {
     y = Number(isoYearMonth.slice(0, 4));
@@ -116,7 +114,6 @@ export function startOfWeekMon(dateObj) {
 // ISO week number (1–53)
 export function weekNumberISO(dateObj) {
   const d = new Date(Date.UTC(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()));
-  // Thursday in current week decides the year.
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
@@ -146,7 +143,6 @@ export function toMoney(n) {
 // Use these to avoid formatting while typing. Only format/clean onBlur.
 
 export const passthrough = (setter) => (eOrValue) => {
-  // supports (event) or (value) style
   const v = eOrValue?.target ? eOrValue.target.value : eOrValue;
   setter(v);
 };
@@ -172,7 +168,6 @@ export const onBlurFormat = (getter, setter, formatter) => () => {
 };
 
 /* -------------------- Phone Prefixes -------------------- */
-// For Mobile prefix dropdowns in Inflow
 export const PHONE_PREFIXES = [
   { label: "+352 (LU)", value: "+352" },
   { label: "+33 (FR)",  value: "+33"  },
@@ -182,10 +177,54 @@ export const PHONE_PREFIXES = [
 ];
 
 /* -------------------- Shared Modal Size -------------------- */
-// Use the same large "workbench" surface for Edit Day & Recruiter Info
 export const MODAL_SIZES = {
   workbench: {
     className: "w-[92vw] max-w-[1200px] h-[82vh]",
     contentClass: "h-full overflow-auto",
   },
 };
+
+/* -------------------- Recruiter Stats Helpers (NEW) -------------------- */
+
+// Color by average rules you gave:
+// ≥ 3.0 => green, ≥ 2.0 => amber, else red
+export function avgColor(scores) {
+  if (!scores || !scores.length) return "#6b7280"; // gray
+  const avg = scores.reduce((a, b) => a + Number(b || 0), 0) / scores.length;
+  if (avg >= 3) return "#16a34a"; // green-600
+  if (avg >= 2) return "#f59e0b"; // amber-500
+  return "#ef4444";               // red-500
+}
+
+// Percent split of Box2/Box4 over the last 8 weeks for a recruiter
+export function boxPercentsLast8w(history, recId) {
+  if (!Array.isArray(history) || !recId) return { b2: 0, b4: 0 };
+  const now = new Date();
+  const cutoff = new Date(now);
+  cutoff.setDate(now.getDate() - 56); // ~8 weeks
+
+  let b2 = 0, b4 = 0;
+  for (const h of history) {
+    const d = new Date(h.dateISO || h.date);
+    if (h.recruiterId === recId && d >= cutoff) {
+      const b2n = Number(h.box2_noDisc) || 0;
+      const b2d = Number(h.box2_disc) || 0;
+      const b4n = Number(h.box4_noDisc) || 0;
+      const b4d = Number(h.box4_disc) || 0;
+      b2 += b2n + b2d;
+      b4 += b4n + b4d;
+    }
+  }
+  const total = b2 + b4;
+  if (total === 0) return { b2: 0, b4: 0 };
+  return { b2: (b2 * 100) / total, b4: (b4 * 100) / total };
+}
+
+// Last 5 scores for a recruiter (oldest→newest preserved then sliced)
+export function last5ScoresFor(history, recId) {
+  if (!Array.isArray(history) || !recId) return [];
+  const rows = history.filter(h => h.recruiterId === recId);
+  // keep chronological order, then take last 5
+  const last5 = rows.slice(-5).map(h => Number(h.score) || 0);
+  return last5;
+}
