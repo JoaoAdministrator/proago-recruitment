@@ -1,14 +1,10 @@
 // Planning.jsx
-// Proago CRM (Chat 10) — Wider Edit Day + Expanded inner table columns
-// - Dialog: w-[95vw] max-w-[1600px] h-[90vh]
-// - Inner table uses table-fixed + colgroup to spread space proportionally
-// - Rows table only appears after "Add Recruiter" (no empty form fields)
-// - Day preview header gray; zone centered; project removed from preview
-// - One-line "Week N" badge handled via whitespace-nowrap
+// Proago CRM — Updates: bigger dialog (fixed), buttons fully visible, multi-zones, equal input widths,
+// preview spacing + bold day, grey header fills to border, project label "Hello Fresh"
 
 import React, { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent, CardHeader } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
@@ -74,7 +70,8 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
     const d = clone(dayData(iso));
     d.teams = (d.teams || []).map((t, ti) => ({
       zone: t.zone || "",
-      project: t.project || "HF",
+      extraZones: t.extraZones || [], // NEW: multiple zones per team
+      project: (t.project === "HF" ? "Hello Fresh" : t.project) || "Hello Fresh",
       shiftType: t.shiftType || "D2D",
       rows: (t.rows || []).map((r, i) => ({
         _rowKey: r?._rowKey ?? i,
@@ -82,6 +79,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
         hours: r.hours ?? "",
         commissionMult: r.commissionMult ?? "",
         score: r.score ?? "",
+        // keep field names; labels elsewhere say "Box 2/Box 2*/Box 4/Box 4*"
         box2_noDisc: r.box2_noDisc ?? "",
         box2_disc: r.box2_disc ?? "",
         box4_noDisc: r.box4_noDisc ?? "",
@@ -104,7 +102,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
   const addTeam = () =>
     setDraft((d) => ({
       ...d,
-      teams: [...(d?.teams || []), { zone: "", project: "HF", shiftType: "D2D", rows: [] }],
+      teams: [...(d?.teams || []), { zone: "", extraZones: [], project: "Hello Fresh", shiftType: "D2D", rows: [] }],
     }));
 
   const delTeam = (ti) =>
@@ -117,6 +115,31 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
     setDraft((d) => {
       const teams = clone(d.teams || []);
       teams[ti] = { ...teams[ti], ...patch };
+      return { ...d, teams };
+    });
+
+  const addZone = (ti) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      (teams[ti].extraZones ||= []).push("");
+      return { ...d, teams };
+    });
+
+  const setZoneAt = (ti, zi, val) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      const arr = [...(teams[ti].extraZones || [])];
+      arr[zi] = val;
+      teams[ti].extraZones = arr;
+      return { ...d, teams };
+    });
+
+  const delZoneAt = (ti, zi) =>
+    setDraft((d) => {
+      const teams = clone(d.teams || []);
+      const arr = [...(teams[ti].extraZones || [])];
+      arr.splice(zi, 1);
+      teams[ti].extraZones = arr;
       return { ...d, teams };
     });
 
@@ -175,7 +198,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
           Number(r.box4_noDisc || 0) +
           Number(r.box4_disc || 0);
         if (sum > sc) {
-          alert("Box2/Box4 totals cannot exceed Score.");
+          alert("Box 2/Box 4 totals cannot exceed Score.");
           return;
         }
       }
@@ -199,8 +222,9 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
             recruiterId: r.recruiterId,
             recruiterName:
               recruiters.find((x) => x.id === r.recruiterId)?.name || "",
-            location: t.zone || "",
-            project: t.project || "HF",
+            // use primary zone, extra zones are for display/context
+            location: [t.zone, ...(t.extraZones || []).filter(Boolean)].filter(Boolean).join(" • "),
+            project: t.project || "Hello Fresh",
             shiftType: t.shiftType || "D2D",
             hours: r.hours === "" ? undefined : Number(r.hours),
             commissionMult:
@@ -229,18 +253,23 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
     return (
       <Card className="flex-1">
         <CardHeader className="pb-2">
-          {/* Gray header for day/date */}
-          <div className="rounded-md bg-zinc-100 px-3 py-2 text-center">
-            <div className="text-sm text-zinc-600">{weekday}</div>
+          {/* Grey header fills to border; bold day; add spacing below */}
+          <div className="rounded-md bg-zinc-100 px-3 py-2 text-center border border-zinc-200">
+            <div className="text-sm font-semibold text-zinc-800">{weekday}</div>
             <div className="text-sm text-zinc-600">{fmtUK(dISO)}</div>
           </div>
         </CardHeader>
-        <CardContent className="grid gap-3 pt-0">
+        <CardContent className="grid gap-3 pt-1">
           {(day.teams || []).map((t, ti) => (
-            <div key={ti} className="border rounded-lg p-2">
-              <div className="font-medium text-center">{t.zone || "—"}</div>
+            <div key={ti} className="border rounded-lg p-2 mt-1">
+              <div className="font-medium text-center mt-1">
+                {t.zone || "—"}
+                {t.extraZones && t.extraZones.filter(Boolean).length
+                  ? <div className="text-xs text-zinc-500">+ {t.extraZones.filter(Boolean).join(" • ")}</div>
+                  : null}
+              </div>
               {(t.rows || []).length ? (
-                <ul className="text-sm space-y-1 mt-1">
+                <ul className="text-sm space-y-1 mt-2">
                   {t.rows.map((r, ri) => {
                     const rec = recruiters.find((x) => x.id === r.recruiterId);
                     const sc = r.score !== "" && r.score != null ? Number(r.score) : "";
@@ -274,7 +303,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
   /* ---------- Render ---------- */
   return (
     <div className="grid gap-4">
-      {/* Week header */}
+      {/* Week header with nav (unchanged) */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Button
@@ -302,25 +331,24 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
         ))}
       </div>
 
-      {/* Edit Day (BIGGER horizontally) */}
+      {/* Edit Day (BIG; buttons not cut) */}
       <Dialog open={!!editDateISO} onOpenChange={(open) => !open && closeEdit()}>
         <DialogContent
-  className="!w-[95vw] !max-w-[95vw] sm:!max-w-[1600px] h-[90vh] p-4"
-  style={{ width: "95vw", maxWidth: "1600px" }}
->
-
+          className="!w-[95vw] !max-w-[95vw] sm:!max-w-[1600px] h-[90vh] p-4"
+          style={{ width: "95vw", maxWidth: "1600px" }}
+        >
           <DialogHeader>
             <DialogTitle>Edit Day — {fmtUK(editDateISO || "")}</DialogTitle>
           </DialogHeader>
 
-          <div className="grid gap-3 h-[calc(90vh-5rem)] overflow-y-auto pr-1">
+          <div className="grid gap-3 h-[calc(90vh-6.5rem)] overflow-y-auto pr-1">
             {(draft?.teams || []).map((t, ti) => {
               const used = usedIds(draft);
               const hasRows = (t.rows || []).length > 0;
               return (
                 <div key={ti} className="border rounded-xl p-3">
                   {/* Team header */}
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-3">
                     <div className="grid gap-1">
                       <Label>Zone</Label>
                       <Input
@@ -329,14 +357,34 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                         onChange={(e) => setTeam(ti, { zone: e.target.value })}
                       />
                     </div>
+                    <div className="grid gap-1 md:col-span-2">
+                      <Label>Extra Zones</Label>
+                      <div className="flex flex-wrap gap-2">
+                        {(t.extraZones || []).map((z, zi) => (
+                          <div key={zi} className="flex items-center gap-2">
+                            <Input
+                              className="h-9"
+                              value={z}
+                              onChange={(e) => setZoneAt(ti, zi, e.target.value)}
+                            />
+                            <Button variant="outline" size="sm" onClick={() => delZoneAt(ti, zi)}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button variant="outline" size="sm" onClick={() => addZone(ti)}>
+                          <Plus className="h-4 w-4 mr-1" /> Add Zone
+                        </Button>
+                      </div>
+                    </div>
                     <div className="grid gap-1">
                       <Label>Project</Label>
                       <select
                         className="h-9 border rounded-md px-2"
-                        value={t.project || "HF"}
+                        value={t.project || "Hello Fresh"}
                         onChange={(e) => setTeam(ti, { project: e.target.value })}
                       >
-                        <option>HF</option>
+                        <option>Hello Fresh</option>
                       </select>
                     </div>
                     <div className="grid gap-1">
@@ -350,31 +398,22 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                         <option value="EVENT">Events</option>
                       </select>
                     </div>
-                    <div className="flex items-end justify-end">
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => delTeam(ti)}
-                      >
-                        <X className="h-4 w-4 mr-1" /> Remove
-                      </Button>
-                    </div>
                   </div>
 
                   {/* Rows: render only if at least one row exists */}
                   {hasRows ? (
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-sm table-fixed">
-                        {/* Use colgroup to allocate width proportionally on the wider dialog */}
+                        {/* Equal widths from Hours through Box 4* */}
                         <colgroup>
                           <col style={{ width: "28%" }} /> {/* Recruiter */}
                           <col style={{ width: "9%" }} />  {/* Hours */}
                           <col style={{ width: "10%" }} /> {/* Mult */}
                           <col style={{ width: "9%" }} />  {/* Score */}
-                          <col style={{ width: "11%" }} /> {/* B2 No */}
-                          <col style={{ width: "11%" }} /> {/* B2 Disc */}
-                          <col style={{ width: "11%" }} /> {/* B4 No */}
-                          <col style={{ width: "11%" }} /> {/* B4 Disc */}
+                          <col style={{ width: "11%" }} /> {/* Box 2 */}
+                          <col style={{ width: "11%" }} /> {/* Box 2* (discount) */}
+                          <col style={{ width: "11%" }} /> {/* Box 4 */}
+                          <col style={{ width: "11%" }} /> {/* Box 4* (discount) */}
                           <col style={{ width: "10%" }} /> {/* Actions */}
                         </colgroup>
                         <thead className="bg-zinc-50">
@@ -383,10 +422,10 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                             <th className="p-2 text-right">Hours</th>
                             <th className="p-2 text-right">Mult</th>
                             <th className="p-2 text-right">Score</th>
-                            <th className="p-2 text-right">B2 No</th>
-                            <th className="p-2 text-right">B2 Disc</th>
-                            <th className="p-2 text-right">B4 No</th>
-                            <th className="p-2 text-right">B4 Disc</th>
+                            <th className="p-2 text-right">Box 2</th>
+                            <th className="p-2 text-right">Box 2*</th>
+                            <th className="p-2 text-right">Box 4</th>
+                            <th className="p-2 text-right">Box 4*</th>
                             <th className="p-2 text-right">Actions</th>
                           </tr>
                         </thead>
@@ -531,12 +570,16 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                     <Button variant="outline" size="sm" onClick={() => addRow(ti)}>
                       <Plus className="h-4 w-4 mr-1" /> Add Recruiter
                     </Button>
+                    <Button variant="destructive" size="sm" className="ml-2" onClick={() => delTeam(ti)}>
+                      <X className="h-4 w-4 mr-1" /> Remove Team
+                    </Button>
                   </div>
                 </div>
               );
             })}
           </div>
 
+          {/* Buttons fully visible (extra bottom padding in scroll area + this static footer) */}
           <div className="flex items-center justify-between mt-3">
             <Button variant="outline" size="sm" onClick={addTeam}>
               <Plus className="h-4 w-4 mr-1" /> Add Team
