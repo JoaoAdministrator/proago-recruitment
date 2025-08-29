@@ -1,5 +1,5 @@
 // util.js
-// Proago CRM — helpers, storage, dates, money, ranks, "Hello Fresh", Indeed importer
+// Proago CRM — helpers, storage, dates, money, ranks (acronyms), "Hello Fresh", Indeed importer
 
 /* ==============================
    Storage helpers
@@ -22,9 +22,7 @@ export const load = (key, fallback) => {
 };
 
 export const save = (key, value) => {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
 };
 
 export const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -41,11 +39,8 @@ export const fmtISO = (d) => {
 };
 
 export const fmtUK = (iso) => {
-  // 2025-08-04 -> 04/08/25
   if (!iso) return "";
-  const y = iso.slice(2, 4);
-  const m = iso.slice(5, 7);
-  const d = iso.slice(8, 10);
+  const y = iso.slice(2, 4), m = iso.slice(5, 7), d = iso.slice(8, 10);
   return `${d}/${m}/${y}`;
 };
 
@@ -64,18 +59,12 @@ export const startOfWeekMon = (date) => {
 };
 
 export const weekNumberISO = (date) => {
-  // ISO week number
   const tmp = new Date(date);
   tmp.setHours(0, 0, 0, 0);
-  // Thursday in current week decides the year.
   tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay() + 6) % 7));
   const week1 = new Date(tmp.getFullYear(), 0, 4);
-  return (
-    1 +
-    Math.round(
-      ((tmp.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) /
-        7
-    )
+  return 1 + Math.round(
+    ((tmp.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7
   );
 };
 
@@ -90,34 +79,28 @@ const MONTHS = [
 ];
 
 export const monthLabel = (ym) => {
-  // "2025-08" -> "August 2025"
   if (!ym || ym.length < 7) return ym || "";
   const y = ym.slice(0, 4);
   const m = Number(ym.slice(5, 7)) - 1;
   return `${MONTHS[m]} ${y}`;
 };
 
-export const toMoney = (n) => {
-  const v = Number(n || 0);
-  return v.toFixed(2);
-};
+export const toMoney = (n) => Number(n || 0).toFixed(2);
 
 /* ==============================
    Ranks (acronyms + ordering)
 ============================== */
-// Full names normalized → acronyms
 export const RANK_ACRONYM = {
   "Branch Manager": "BM",
   "Sales Manager": "SM",
   "Team Captain": "TC",
   "Pool Captain": "PC",
-  Promoter: "PR",
-  Rookie: "RK",
+  "Promoter": "PR",
+  "Rookie": "RK",
 };
 
 export const toRankAcr = (role) => {
   if (!role) return "RK";
-  // Accept either full or already-acronym values
   const full = String(role).trim();
   if (RANK_ACRONYM[full]) return RANK_ACRONYM[full];
   const U = full.toUpperCase();
@@ -125,7 +108,6 @@ export const toRankAcr = (role) => {
   return "RK";
 };
 
-// Order: BM > SM > TC > PC > PR > RK
 const RANK_ORDER = { BM: 6, SM: 5, TC: 4, PC: 3, PR: 2, RK: 1 };
 export const rankOrderValue = (role) => RANK_ORDER[toRankAcr(role)] || 0;
 
@@ -134,7 +116,6 @@ export const rankOrderValue = (role) => RANK_ORDER[toRankAcr(role)] || 0;
 ============================== */
 export const DEFAULT_SETTINGS = {
   projects: ["Hello Fresh"],
-  // Conversion matrix (values: € per conversion; labels handled in UI)
   conversionType: {
     D2D: {
       noDiscount: { box2: 0, box4: 0 },
@@ -145,7 +126,6 @@ export const DEFAULT_SETTINGS = {
       discount:   { box2: 0, box4: 0 },
     },
   },
-  // Hourly rate bands by start date
   rateBands: [
     { startISO: "2025-01-01", rate: 15 },
   ],
@@ -156,9 +136,7 @@ export const rateForDate = (settings, dateISO) => {
   const bands = (s.rateBands || []).slice().sort((a,b)=> (a.startISO<b.startISO?-1:1));
   const d = dateISO ? new Date(dateISO) : new Date();
   let current = bands[0]?.rate ?? 15;
-  for (const b of bands) {
-    if (new Date(b.startISO) <= d) current = Number(b.rate || 0);
-  }
+  for (const b of bands) if (new Date(b.startISO) <= d) current = Number(b.rate || 0);
   return current;
 };
 
@@ -180,12 +158,10 @@ export function extractIndeedAppliedAt(raw) {
 
 export function normalizeIndeedLead(raw) {
   if (!raw || typeof raw !== "object") throw new Error("Invalid Indeed JSON");
-
   const appliedAtISO = extractIndeedAppliedAt(raw);
   const fullName = coalesce(raw?.applicant?.fullName, "");
   const email = coalesce(raw?.applicant?.email, raw?.applicant?.emailAlias, "");
   const phone = coalesce(raw?.applicant?.phoneNumber, "");
-
   const country = coalesce(raw?.applicant?.location?.country, "");
   const city = coalesce(raw?.applicant?.location?.city, "");
   const jobTitle = coalesce(raw?.job?.jobTitle, "");
@@ -193,14 +169,12 @@ export function normalizeIndeedLead(raw) {
   const jobLocation = coalesce(raw?.job?.jobLocation, "");
   const jobUrl = coalesce(raw?.job?.jobUrl, "");
   const resumeFileName = coalesce(raw?.applicant?.resume?.file?.fileName, "");
-
   const qa = Array.isArray(raw?.questionsAndAnswers?.questionsAndAnswers)
     ? raw.questionsAndAnswers.questionsAndAnswers.map((q) => ({
         question: q?.question?.question ?? "",
         answer: q?.answer?.label ?? q?.answer?.value ?? "",
       }))
     : [];
-
   return {
     id:
       (typeof crypto !== "undefined" && crypto.randomUUID)
@@ -208,16 +182,14 @@ export function normalizeIndeedLead(raw) {
         : `lead_${Date.now()}_${Math.random().toString(36).slice(2)}`,
     name: fullName,
     email,
-    mobile: phone, // Phone → Mobile
+    mobile: phone,
     source: "Indeed",
-    appliedAtISO, // Leads date/time (independent of interview/formation)
+    appliedAtISO,
     calls: 0,
-
     location: { country, city },
     jobInfo: { jobTitle, jobCompany, jobLocation, jobUrl },
     resumeFileName,
     qa,
-
     interviewAtISO: "",
     formationAtISO: "",
     notes: "",
@@ -238,11 +210,3 @@ export function parseIndeedFiles(fileContentsArray) {
   }
   return { results, errors };
 }
-
-/* ==============================
-   Misc (title case if needed)
-============================== */
-export const titleCase = (s) =>
-  String(s || "")
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
