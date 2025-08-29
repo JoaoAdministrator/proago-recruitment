@@ -1,5 +1,6 @@
-// util.js — Proago CRM (v2025-08-29f)
-// Shared helpers, storage, formatting, defaults (fixed export for formatPhoneByCountry)
+// util.js — Proago CRM (v2025-08-29g final)
+// Shared helpers, storage, formatting, defaults.
+// IMPORTANT: explicitly named-exports formatPhoneByCountry.
 
 export const K = {
   settings: "proago_settings_v1",
@@ -13,42 +14,36 @@ export const DEFAULT_SETTINGS = {
   projects: ["Hello Fresh"],
   rateBands: [{ startISO: "2025-01-01", rate: 15 }],
   conversionType: {
-    D2D: { noDiscount: { box2: 50, box4: 90 }, discount: { box2: 35, box4: 70 } },
+    D2D:  { noDiscount: { box2: 50, box4: 90 }, discount: { box2: 35, box4: 70 } },
     EVENT:{ noDiscount: { box2: 40, box4: 80 }, discount: { box2: 30, box4: 60 } },
   },
 };
 
-// Storage
+// ---------- Storage ----------
 export const load = (k, fallback) => {
   try { const v = localStorage.getItem(typeof k === "string" ? k : K[k]); return v ? JSON.parse(v) : fallback; }
   catch { return fallback; }
 };
 export const save = (k, v) => { try { localStorage.setItem(typeof k === "string" ? k : K[k], JSON.stringify(v)); } catch {} };
 
-export const clone = (x) => JSON.parse(JSON.stringify(x || null));
+export const clone = (x) => JSON.parse(JSON.stringify(x ?? null));
 
-// Formatting
+// ---------- Formatting ----------
 export const titleCase = (s) =>
   String(s || "")
     .toLowerCase()
     .replace(/\b([a-zà-ÿ])/g, (m) => m.toUpperCase());
 
-export const toMoney = (n) => {
-  const v = Number(n || 0);
-  return v.toFixed(2);
-};
+export const toMoney = (n) => Number(n || 0).toFixed(2);
 
-// Dates
+// ---------- Dates ----------
 export const fmtISO = (d) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 };
-export const fmtUK = (iso) => {
-  if (!iso) return "";
-  return `${iso.slice(8,10)}/${iso.slice(5,7)}/${iso.slice(2,4)}`; // DD/MM/YY
-};
+export const fmtUK = (iso) => (iso ? `${iso.slice(8,10)}/${iso.slice(5,7)}/${iso.slice(2,4)}` : "");
 export const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 export const startOfWeekMon = (d) => {
   const x = new Date(d);
@@ -58,12 +53,10 @@ export const startOfWeekMon = (d) => {
   return x;
 };
 export const weekNumberISO = (d) => {
-  const date = new Date(d);
-  date.setHours(0,0,0,0);
+  const date = new Date(d); date.setHours(0,0,0,0);
   date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
   const week1 = new Date(date.getFullYear(), 0, 4);
-  return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000
-    - 3 + ((week1.getDay() + 6) % 7)) / 7);
+  return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
 };
 export const monthKey = (iso) => (iso || "").slice(0, 7);
 export const monthLabel = (ym) => {
@@ -72,7 +65,7 @@ export const monthLabel = (ym) => {
   return d.toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
 };
 
-// Rates
+// ---------- Rates ----------
 export const rateForDate = (settings, iso) => {
   const bands = (settings?.rateBands || DEFAULT_SETTINGS.rateBands).slice().sort((a,b)=> a.startISO.localeCompare(b.startISO));
   const target = iso || fmtISO(new Date());
@@ -81,29 +74,28 @@ export const rateForDate = (settings, iso) => {
   return rate;
 };
 
-// Phones — fixed export
-export const formatPhoneByCountry = (raw) => {
+// ---------- Phones (Lux/FR/BE/DE) ----------
+// Named export to satisfy Rollup.
+export function formatPhoneByCountry(raw) {
   const clean = String(raw || "").replace(/\s+/g, "");
   if (!clean.startsWith("+")) return { ok: false, display: "" };
 
   const prefixes = [
-    { cc: "+352", len: 11 }, // Luxembourg
-    { cc: "+33", len: 11 },  // France
-    { cc: "+32", len: 11 },  // Belgium
-    { cc: "+49", len: 12 },  // Germany
+    { cc: "+352", min: 6, max: 12 }, // Luxembourg
+    { cc: "+33",  min: 6, max: 12 }, // France
+    { cc: "+32",  min: 6, max: 12 }, // Belgium
+    { cc: "+49",  min: 6, max: 13 }, // Germany
   ];
+  const p = prefixes.find((p) => clean.startsWith(p.cc));
+  if (!p) return { ok: false, display: "" };
 
-  const prefix = prefixes.find((p) => clean.startsWith(p.cc));
-  if (!prefix) return { ok: false, display: "" };
+  const rest = clean.slice(p.cc.length).replace(/\D+/g, "");
+  if (rest.length < p.min || rest.length > p.max) return { ok: false, display: "" };
 
-  const rest = clean.slice(prefix.cc.length).replace(/\D+/g, "");
-  if (!rest.length) return { ok: false, display: "" };
+  return { ok: true, display: `${p.cc} ${rest}` };
+}
 
-  const display = `${prefix.cc} ${rest}`;
-  return { ok: true, display };
-};
-
-// Ranks
+// ---------- Ranks ----------
 export const rankAcr = (role) => {
   const m = { Rookie: "RK", Promoter: "PR", "Pool Captain": "PC", "Team Captain": "TC", "Sales Manager": "SM", "Branch Manager": "BM" };
   return m[role] || "RK";
@@ -113,14 +105,13 @@ export const rankOrderVal = (acr) => {
   return order[acr] ?? 0;
 };
 
-// Scores & box percentages
-export const last5ScoresFor = (history, recruiterId) => {
-  return history
+// ---------- Score & Box stats ----------
+export const last5ScoresFor = (history, recruiterId) =>
+  history
     .filter(h => h.recruiterId === recruiterId && h.score != null)
     .sort((a,b) => (a.dateISO < b.dateISO ? 1 : -1))
     .slice(0,5)
     .map(h => Number(h.score) || 0);
-};
 
 export const boxPercentsLast8w = (history, recruiterId) => {
   const now = new Date();
