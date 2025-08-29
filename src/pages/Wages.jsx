@@ -1,11 +1,10 @@
-// Wages.jsx
-// Proago CRM — Pay page updates: labels without €, badge "August 2025" style,
-// include inactive recruiters toggle, Box labels "Box 2/Box 2*/Box 4/Box 4*"
+// pages/Wages.jsx
+// Proago CRM — Pay page updates: month badge style, "Wages • ..." / "Bonus • ...",
+// equal column widths, inactive toggle (no 'Status' label), labels without € (numbers keep €)
 
 import React, { useMemo, useState } from "react";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { Label } from "../components/ui/label";
 import { ChevronLeft, ChevronRight, ChevronDown } from "lucide-react";
 import {
   load, K, DEFAULT_SETTINGS, rateForDate,
@@ -17,11 +16,11 @@ const roleHoursDefault = (role) => role === "Pool Captain" ? 7 : (role === "Team
 const roleMultiplierDefault = (role) => role === "Pool Captain" ? 1.25 : role === "Team Captain" ? 1.5 : role === "Sales Manager" ? 2.0 : 1.0;
 
 const prevMonthKey = (ym) => { const [Y, M] = ym.split("-").map(Number); const d = new Date(Date.UTC(Y, M - 1, 1)); d.setUTCMonth(d.getUTCMonth() - 1); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
-const currentMonthKey = () => { const d = new Date(); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
+const curMonthKey = () => { const d = new Date(); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
 
-export default function Wages({ recruiters, history }) {
-  const [payMonth, setPayMonth] = useState(currentMonthKey());
-  const [status, setStatus] = useState("all"); // show inactive too
+export default function Wages({ recruiters = [], history = [] }) {
+  const [payMonth, setPayMonth] = useState(curMonthKey());
+  const [status, setStatus] = useState("active"); // active | inactive | all
   const [open, setOpen] = useState({}); // recruiterId => bool
 
   const wagesMonth = useMemo(() => prevMonthKey(payMonth), [payMonth]);
@@ -47,7 +46,6 @@ export default function Wages({ recruiters, history }) {
         const bonusShifts = history
           .filter(h => h.recruiterId === r.id && inMonth(h.dateISO || h.date, bonusMonth))
           .map(h => {
-            // Box 2/4 labels elsewhere; here we just compute
             const box2 = (Number(h.box2_noDisc) || 0) + (Number(h.box2_disc) || 0);
             const mult = (h.commissionMult != null && h.commissionMult !== "") ? Number(h.commissionMult) : roleMultiplierDefault(h.roleAtShift || r.role || "Rookie");
             const base = rookieCommission(box2);
@@ -60,19 +58,23 @@ export default function Wages({ recruiters, history }) {
       });
   }, [recruiters, history, status, settings, wagesMonth, bonusMonth]);
 
-  const monthShift = (delta) => { const [y, m] = payMonth.split("-").map(Number); const d = new Date(Date.UTC(y, m - 1, 1)); d.setUTCMonth(d.getUTCMonth() + delta); setPayMonth(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`); };
+  const shiftMonth = (d) => {
+    const [y, m] = payMonth.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, 1));
+    dt.setUTCMonth(dt.getUTCMonth() + d);
+    setPayMonth(`${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`);
+  };
 
   return (
     <div className="grid gap-4">
       <div className="flex justify-between items-center">
         <div className="flex gap-2 items-center">
-          <Button variant="outline" onClick={() => monthShift(-1)}><ChevronLeft className="h-4 w-4" /> Prev</Button>
-          {/* Label text w/o €; numbers have € */}
+          <Button variant="outline" onClick={() => shiftMonth(-1)}><ChevronLeft className="h-4 w-4" /> Prev</Button>
           <Badge style={{ background: "#fca11c" }}>{monthLabel(payMonth)}</Badge>
-          <Button variant="outline" onClick={() => monthShift(1)}>Next <ChevronRight className="h-4 w-4" /></Button>
+          <Button variant="outline" onClick={() => shiftMonth(1)}>Next <ChevronRight className="h-4 w-4" /></Button>
         </div>
         <div className="flex gap-2 items-center">
-          <Label>Status</Label>
+          {/* no label text "Status" per request */}
           <select className="h-10 border rounded-md px-2" value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
@@ -81,13 +83,20 @@ export default function Wages({ recruiters, history }) {
         </div>
       </div>
 
+      {/* Subheader — use bullets instead of long sentence */}
       <div className="text-sm text-muted-foreground">
-        <span>Wages from <b>{monthLabel(wagesMonth)}</b></span>{" • "}
-        <span>Bonus from <b>{monthLabel(bonusMonth)}</b></span>
+        Wages • <b>{monthLabel(wagesMonth)}</b> &nbsp;•&nbsp; Bonus • <b>{monthLabel(bonusMonth)}</b>
       </div>
 
       <div className="overflow-x-auto border rounded-xl">
-        <table className="min-w-full text-sm">
+        <table className="min-w-full text-sm table-fixed">
+          <colgroup>
+            <col style={{ width: "34%" }} /> {/* Name */}
+            <col style={{ width: "16%" }} /> {/* Wages */}
+            <col style={{ width: "16%" }} /> {/* Bonus */}
+            <col style={{ width: "18%" }} /> {/* Total */}
+            <col style={{ width: "16%" }} /> {/* Details */}
+          </colgroup>
           <thead className="bg-zinc-50">
             <tr>
               <th className="p-3 text-left">Name</th>
@@ -100,6 +109,7 @@ export default function Wages({ recruiters, history }) {
           <tbody>
             {rows.map(({ recruiter: r, wages, bonus, wageShifts, bonusShifts }) => {
               const total = wages + bonus;
+              const openRow = !!open[r.id];
               return (
                 <React.Fragment key={r.id}>
                   <tr className="border-t">
@@ -108,13 +118,12 @@ export default function Wages({ recruiters, history }) {
                     <td className="p-3 text-right">€{toMoney(bonus)}</td>
                     <td className="p-3 text-right font-medium">€{toMoney(total)}</td>
                     <td className="p-3 text-right">
-                      <Button variant="outline" size="sm" onClick={() => setOpen(o => ({ ...o, [r.id]: !o[r.id] }))}>
-                        {open[r.id] ? "Hide" : "View"} <ChevronDown className="h-4 w-4 ml-1" />
+                      <Button variant="outline" size="sm" onClick={() => setOpen(o => ({ ...o, [r.id]: !openRow }))}>
+                        {openRow ? "Hide" : "View"} <ChevronDown className="h-4 w-4 ml-1" />
                       </Button>
                     </td>
                   </tr>
-
-                  {open[r.id] && (
+                  {openRow && (
                     <tr>
                       <td colSpan={5} className="p-0">
                         <div className="px-3 pb-3">
@@ -184,6 +193,11 @@ export default function Wages({ recruiters, history }) {
                 </React.Fragment>
               );
             })}
+            {!rows.length && (
+              <tr>
+                <td colSpan={5} className="p-4 text-center text-zinc-500">No recruiters to display.</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
