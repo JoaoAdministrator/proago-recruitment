@@ -1,18 +1,19 @@
 // App.jsx
-// Proago CRM — Global fonts, header layout, Lora nav+logout, Finances re-login
+// Proago CRM — global Nunito font, Lora for nav+logout+login title, logout beside settings,
+// Finances requires re-login
 
 import React, { useEffect, useState } from "react";
 import Inflow from "./pages/Inflow";
 import Recruiters from "./pages/Recruiters";
 import Planning from "./pages/Planning";
-import Wages from "./pages/Wages";      // "Pay"
+import Wages from "./pages/Wages"; // Pay
 import Finances from "./pages/Finances";
 import Settings from "./pages/Settings";
 
 import { Button } from "./components/ui/button";
 import { load, save, K, DEFAULT_SETTINGS } from "./util";
 
-// ---------- Fonts (Nunito global, Lora for nav + Logout) ----------
+// ---------- Fonts ----------
 function useFonts() {
   useEffect(() => {
     const links = [
@@ -45,7 +46,10 @@ const Login = ({ title = "Proago CRM", onOk }) => {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   return (
-    <div className="min-h-screen grid place-items-center bg-zinc-50" style={{ fontFamily: "Nunito, system-ui, sans-serif" }}>
+    <div
+      className="min-h-screen grid place-items-center bg-zinc-50"
+      style={{ fontFamily: "Nunito, system-ui, sans-serif" }}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -56,7 +60,12 @@ const Login = ({ title = "Proago CRM", onOk }) => {
         className="w-[420px] max-w-[95vw] bg-white rounded-2xl p-6 shadow-sm border"
       >
         <div className="flex items-center justify-center gap-2 mb-4">
-          <div className="text-xl font-bold tracking-wide">{title}</div>
+          <div
+            className="text-xl font-bold tracking-wide"
+            style={{ fontFamily: "Lora, serif" }}
+          >
+            {title}
+          </div>
         </div>
         <div className="grid gap-3">
           <div className="grid gap-1">
@@ -111,16 +120,13 @@ export default function App() {
   const [finAuthToken, setFinAuthToken] = useState(0);
   const [finLoginStep, setFinLoginStep] = useState(false);
 
-  // Settings
   const [settings, setSettings] = useState(() => load(K.settings, DEFAULT_SETTINGS));
   useEffect(() => save(K.settings, settings), [settings]);
 
   const navBtn = "px-3 h-10 rounded-md";
   const lora = { fontFamily: "Lora, serif" };
 
-  if (!auth) {
-    return <Login title="Proago CRM" onOk={doLogin} />;
-  }
+  if (!auth) return <Login title="Proago CRM" onOk={doLogin} />;
 
   const Page = () => {
     if (active === "Inflow") return <Inflow />;
@@ -165,12 +171,7 @@ export default function App() {
                       key={tab}
                       onClick={() => setActive(tab)}
                       className={`${navBtn} border`}
-                      style={{
-                        ...lora,
-                        background: "white",
-                        color: "black",
-                        borderColor: isActive ? "#d9010b" : "#e5e7eb",
-                      }}
+                      style={{ ...lora, background: "white", color: "black" }}
                     >
                       {tab}
                     </button>
