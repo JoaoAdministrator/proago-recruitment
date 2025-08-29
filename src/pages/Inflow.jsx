@@ -1,14 +1,5 @@
 // Inflow.jsx — Proago CRM (v2025-08-29k final)
-// Tweaks requested:
-// • Remove page title row
-// • Add + Import buttons: black bg, white text
-// • Back/Move => Up/Down arrow icons only
-// • Center Source + Calls columns; numbers align
-// • Mobile column editable via Input (textbox)
-// • Time input padding trimmed on the right
-// • New Lead dialog: wider, full-width inputs; footer right-aligned (Cancel left of Save)
-// • JSON import functional (expects array of leads)
-// • Hardened util import so Rollup always finds formatPhoneByCountry
+// Tweaks requested + hardened util import.
 
 import React, { useRef, useState } from "react";
 import { Button } from "../components/ui/button";
@@ -19,7 +10,7 @@ import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Upload, Trash2, Plus, ChevronUp, ChevronDown } from "lucide-react";
 
-// Robust util import (prevents build errors if cache lags)
+// HARDENED util import (prevents Rollup “not exported” error)
 import * as U from "../util.js";
 const { titleCase, clone, fmtISO } = U;
 const formatPhoneByCountry = U.formatPhoneByCountry || function (raw) {
@@ -59,7 +50,7 @@ const AddLeadDialog = ({ open, onOpenChange, onSave }) => {
     const lead = {
       id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
       name: nm,
-      phone: m.display, // stored as "phone", shown as Mobile
+      phone: m.display,
       email: email.trim(),
       source: source.trim(),
       calls,
