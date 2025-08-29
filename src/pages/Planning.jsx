@@ -1,6 +1,6 @@
-// Planning.jsx
-// Proago CRM — Updates: bigger dialog (fixed), buttons fully visible, multi-zones, equal input widths,
-// preview spacing + bold day, grey header fills to border, project label "Hello Fresh"
+// pages/Planning.jsx
+// Proago CRM — Planning updates: wide edit modal, inputs equalized, multi-zones (Zone 1/2/...),
+// day header styling, button spacing, "Edit Day" black/white.
 
 import React, { useEffect, useState } from "react";
 import { Button } from "../components/ui/button";
@@ -26,6 +26,11 @@ import {
 } from "../util";
 
 const scoreColor = (v) => (v >= 3 ? "#10b981" : v >= 2 ? "#fbbf24" : "#ef4444");
+const onlyNum = (s) => {
+  const t = String(s ?? "");
+  if (t === "") return "";
+  return t.replace(/\D+/g, "");
+};
 
 // upsert history by (recruiterId, dateISO, _rowKey)
 const upsertHistory = (list, row) => {
@@ -33,14 +38,6 @@ const upsertHistory = (list, row) => {
   const map = new Map(list.map((r) => [key(r), r]));
   map.set(key(row), { ...(map.get(key(row)) || {}), ...row });
   return Array.from(map.values());
-};
-
-// numeric sanitizer (keeps "", or digits only)
-const onlyNum = (s) => {
-  const t = String(s ?? "");
-  if (t === "") return "";
-  const m = t.match(/^\d+$/);
-  return m ? t : t.replace(/\D+/g, "");
 };
 
 export default function Planning({ recruiters, planning, setPlanning, history, setHistory }) {
@@ -70,7 +67,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
     const d = clone(dayData(iso));
     d.teams = (d.teams || []).map((t, ti) => ({
       zone: t.zone || "",
-      extraZones: t.extraZones || [], // NEW: multiple zones per team
+      extraZones: t.extraZones || [],
       project: (t.project === "HF" ? "Hello Fresh" : t.project) || "Hello Fresh",
       shiftType: t.shiftType || "D2D",
       rows: (t.rows || []).map((r, i) => ({
@@ -79,7 +76,6 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
         hours: r.hours ?? "",
         commissionMult: r.commissionMult ?? "",
         score: r.score ?? "",
-        // keep field names; labels elsewhere say "Box 2/Box 2*/Box 4/Box 4*"
         box2_noDisc: r.box2_noDisc ?? "",
         box2_disc: r.box2_disc ?? "",
         box4_noDisc: r.box4_noDisc ?? "",
@@ -222,8 +218,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
             recruiterId: r.recruiterId,
             recruiterName:
               recruiters.find((x) => x.id === r.recruiterId)?.name || "",
-            // use primary zone, extra zones are for display/context
-            location: [t.zone, ...(t.extraZones || []).filter(Boolean)].filter(Boolean).join(" • "),
+            location: [t.zone || "Zone 1", ...(t.extraZones || []).filter(Boolean)].filter(Boolean).join(" • "),
             project: t.project || "Hello Fresh",
             shiftType: t.shiftType || "D2D",
             hours: r.hours === "" ? undefined : Number(r.hours),
@@ -253,19 +248,19 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
     return (
       <Card className="flex-1">
         <CardHeader className="pb-2">
-          {/* Grey header fills to border; bold day; add spacing below */}
+          {/* Grey header fills to border; bold day; spacing below */}
           <div className="rounded-md bg-zinc-100 px-3 py-2 text-center border border-zinc-200">
-            <div className="text-sm font-semibold text-zinc-800">{weekday}</div>
+            <div className="text-sm font-semibold text-zinc-900">{weekday}</div>
             <div className="text-sm text-zinc-600">{fmtUK(dISO)}</div>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3 pt-1">
           {(day.teams || []).map((t, ti) => (
-            <div key={ti} className="border rounded-lg p-2 mt-1">
+            <div key={ti} className="border rounded-lg p-2 mt-2">
               <div className="font-medium text-center mt-1">
-                {t.zone || "—"}
+                {t.zone || "Zone 1"}
                 {t.extraZones && t.extraZones.filter(Boolean).length
-                  ? <div className="text-xs text-zinc-500">+ {t.extraZones.filter(Boolean).join(" • ")}</div>
+                  ? <div className="text-xs text-zinc-500 mt-0.5">+ {t.extraZones.filter(Boolean).join(" • ")}</div>
                   : null}
               </div>
               {(t.rows || []).length ? (
@@ -287,11 +282,17 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                   })}
                 </ul>
               ) : null}
+              {/* extra spacing between day header and team box */}
             </div>
           ))}
 
-          <div className="flex justify-center pt-1">
-            <Button variant="outline" size="sm" onClick={() => openEdit(dISO)}>
+          <div className="flex justify-center pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => openEdit(dISO)}
+              style={{ background: "black", color: "white", borderColor: "black" }}
+            >
               Edit Day
             </Button>
           </div>
@@ -303,7 +304,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
   /* ---------- Render ---------- */
   return (
     <div className="grid gap-4">
-      {/* Week header with nav (unchanged) */}
+      {/* Week header with nav (no layout shift on click) */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Button
@@ -345,18 +346,20 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
             {(draft?.teams || []).map((t, ti) => {
               const used = usedIds(draft);
               const hasRows = (t.rows || []).length > 0;
+              // Equal widths for Zone / Project / Shift Type
               return (
                 <div key={ti} className="border rounded-xl p-3">
                   {/* Team header */}
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-3">
-                    <div className="grid gap-1">
-                      <Label>Zone</Label>
+                    <div className="grid gap-1 md:col-span-2">
+                      <Label>{t.zone ? "Zone" : "Zone 1"}</Label>
                       <Input
                         className="h-9"
                         value={t.zone}
                         onChange={(e) => setTeam(ti, { zone: e.target.value })}
                       />
                     </div>
+
                     <div className="grid gap-1 md:col-span-2">
                       <Label>Extra Zones</Label>
                       <div className="flex flex-wrap gap-2">
@@ -377,43 +380,46 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                         </Button>
                       </div>
                     </div>
+
                     <div className="grid gap-1">
                       <Label>Project</Label>
                       <select
-                        className="h-9 border rounded-md px-2"
+                        className="h-9 border rounded-md px-2 w-full"
                         value={t.project || "Hello Fresh"}
                         onChange={(e) => setTeam(ti, { project: e.target.value })}
                       >
                         <option>Hello Fresh</option>
                       </select>
                     </div>
-                    <div className="grid gap-1">
-                      <Label>Shift Type</Label>
-                      <select
-                        className="h-9 border rounded-md px-2"
-                        value={t.shiftType || "D2D"}
-                        onChange={(e) => setTeam(ti, { shiftType: e.target.value })}
-                      >
-                        <option value="D2D">Door-to-Door</option>
-                        <option value="EVENT">Events</option>
-                      </select>
+
+                    <div className="grid gap-1 md:col-span-5 grid-cols-1 md:grid-cols-3">
+                      <div className="grid gap-1">
+                        <Label>Shift Type</Label>
+                        <select
+                          className="h-9 border rounded-md px-2 w-full"
+                          value={t.shiftType || "D2D"}
+                          onChange={(e) => setTeam(ti, { shiftType: e.target.value })}
+                        >
+                          <option value="D2D">Door-to-Door</option>
+                          <option value="EVENT">Events</option>
+                        </select>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Rows: render only if at least one row exists */}
+                  {/* Rows: equal input widths for Hours/Mult/Score and Box 2* etc */}
                   {hasRows ? (
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-sm table-fixed">
-                        {/* Equal widths from Hours through Box 4* */}
                         <colgroup>
                           <col style={{ width: "28%" }} /> {/* Recruiter */}
                           <col style={{ width: "9%" }} />  {/* Hours */}
                           <col style={{ width: "10%" }} /> {/* Mult */}
                           <col style={{ width: "9%" }} />  {/* Score */}
                           <col style={{ width: "11%" }} /> {/* Box 2 */}
-                          <col style={{ width: "11%" }} /> {/* Box 2* (discount) */}
+                          <col style={{ width: "11%" }} /> {/* Box 2* */}
                           <col style={{ width: "11%" }} /> {/* Box 4 */}
-                          <col style={{ width: "11%" }} /> {/* Box 4* (discount) */}
+                          <col style={{ width: "11%" }} /> {/* Box 4* */}
                           <col style={{ width: "10%" }} /> {/* Actions */}
                         </colgroup>
                         <thead className="bg-zinc-50">
@@ -458,97 +464,28 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
                                 </select>
                               </td>
 
-                              <td className="p-2 text-right">
-                                <Input
-                                  className="w-full h-9 text-right"
-                                  inputMode="numeric"
-                                  value={r.hours ?? ""}
-                                  onChange={(e) =>
-                                    setRow(ti, ri, { hours: onlyNum(e.target.value) })
-                                  }
-                                />
-                              </td>
-
-                              <td className="p-2 text-right">
-                                <select
-                                  className="h-9 border rounded-md px-2 w-full"
-                                  value={r.commissionMult ?? ""}
-                                  onChange={(e) =>
-                                    setRow(ti, ri, {
-                                      commissionMult: onlyNum(e.target.value),
-                                    })
-                                  }
-                                >
-                                  <option value="">—</option>
-                                  <option value="1">100%</option>
-                                  <option value="1.25">125%</option>
-                                  <option value="1.5">150%</option>
-                                  <option value="2">200%</option>
-                                </select>
-                              </td>
-
-                              <td className="p-2 text-right">
-                                <Input
-                                  className="w-full h-9 text-right"
-                                  inputMode="numeric"
-                                  value={r.score ?? ""}
-                                  onChange={(e) =>
-                                    setRow(ti, ri, { score: onlyNum(e.target.value) })
-                                  }
-                                />
-                              </td>
-
-                              <td className="p-2 text-right">
-                                <Input
-                                  className="w-full h-9 text-right"
-                                  inputMode="numeric"
-                                  value={r.box2_noDisc ?? ""}
-                                  onChange={(e) =>
-                                    setRow(ti, ri, {
-                                      box2_noDisc: onlyNum(e.target.value),
-                                    })
-                                  }
-                                />
-                              </td>
-
-                              <td className="p-2 text-right">
-                                <Input
-                                  className="w-full h-9 text-right"
-                                  inputMode="numeric"
-                                  value={r.box2_disc ?? ""}
-                                  onChange={(e) =>
-                                    setRow(ti, ri, {
-                                      box2_disc: onlyNum(e.target.value),
-                                    })
-                                  }
-                                />
-                              </td>
-
-                              <td className="p-2 text-right">
-                                <Input
-                                  className="w-full h-9 text-right"
-                                  inputMode="numeric"
-                                  value={r.box4_noDisc ?? ""}
-                                  onChange={(e) =>
-                                    setRow(ti, ri, {
-                                      box4_noDisc: onlyNum(e.target.value),
-                                    })
-                                  }
-                                />
-                              </td>
-
-                              <td className="p-2 text-right">
-                                <Input
-                                  className="w-full h-9 text-right"
-                                  inputMode="numeric"
-                                  value={r.box4_disc ?? ""}
-                                  onChange={(e) =>
-                                    setRow(ti, ri, {
-                                      box4_disc: onlyNum(e.target.value),
-                                    })
-                                  }
-                                />
-                              </td>
+                              {[
+                                ["hours", r.hours],
+                                ["commissionMult", r.commissionMult],
+                                ["score", r.score],
+                                ["box2_noDisc", r.box2_noDisc],
+                                ["box2_disc", r.box2_disc],
+                                ["box4_noDisc", r.box4_noDisc],
+                                ["box4_disc", r.box4_disc],
+                              ].map(([key, val], kIndex) => (
+                                <td key={key} className="p-2 text-right">
+                                  <Input
+                                    className="w-full h-9 text-right"
+                                    inputMode="numeric"
+                                    value={val ?? ""}
+                                    onChange={(e) =>
+                                      setRow(ti, ri, {
+                                        [key]: onlyNum(e.target.value),
+                                      })
+                                    }
+                                  />
+                                </td>
+                              ))}
 
                               <td className="p-2 text-right">
                                 <Button
@@ -579,7 +516,7 @@ export default function Planning({ recruiters, planning, setPlanning, history, s
             })}
           </div>
 
-          {/* Buttons fully visible (extra bottom padding in scroll area + this static footer) */}
+          {/* Footer buttons with comfortable spacing from border */}
           <div className="flex items-center justify-between mt-3">
             <Button variant="outline" size="sm" onClick={addTeam}>
               <Plus className="h-4 w-4 mr-1" /> Add Team
