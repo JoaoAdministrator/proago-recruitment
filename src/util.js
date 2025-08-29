@@ -1,172 +1,138 @@
-// Settings.jsx — Proago CRM (v2025-08-29g)
-// Changes:
-// • Project = “Hello Fresh”
-// • Conversion matrix headings without parentheses
-// • “Delete Planning History” also deletes Recruiters + History (hard reset), then suggests reload
+// util.js — Proago CRM (v2025-08-29f)
+// Shared helpers, storage, formatting, defaults (fixed export for formatPhoneByCountry)
 
-import React from "react";
-import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
-import { load, K, DEFAULT_SETTINGS, clone } from "../util";
+export const K = {
+  settings: "proago_settings_v1",
+  pipeline: "proago_pipeline_v1",
+  recruiters: "proago_recruiters_v1",
+  planning: "proago_planning_v1",
+  history: "proago_history_v1",
+};
 
-export default function Settings({ settings, setSettings }) {
+export const DEFAULT_SETTINGS = {
+  projects: ["Hello Fresh"],
+  rateBands: [{ startISO: "2025-01-01", rate: 15 }],
+  conversionType: {
+    D2D: { noDiscount: { box2: 50, box4: 90 }, discount: { box2: 35, box4: 70 } },
+    EVENT:{ noDiscount: { box2: 40, box4: 80 }, discount: { box2: 30, box4: 60 } },
+  },
+};
 
-  const onChangeRate = (i, field, value) => {
-    setSettings((s) => {
-      const next = clone(s);
-      next.rateBands[i][field] = field === "rate" ? Number(value || 0) : value;
-      return next;
-    });
-  };
+// Storage
+export const load = (k, fallback) => {
+  try { const v = localStorage.getItem(typeof k === "string" ? k : K[k]); return v ? JSON.parse(v) : fallback; }
+  catch { return fallback; }
+};
+export const save = (k, v) => { try { localStorage.setItem(typeof k === "string" ? k : K[k], JSON.stringify(v)); } catch {} };
 
-  const addRateBand = () => {
-    setSettings((s) => {
-      const next = clone(s);
-      next.rateBands.push({ startISO: "2026-01-01", rate: 16 });
-      return next;
-    });
-  };
+export const clone = (x) => JSON.parse(JSON.stringify(x || null));
 
-  const deletePlanningHistory = () => {
-    if (!confirm("Delete ALL recruiters and ALL planning history? This cannot be undone.")) return;
-    try {
-      localStorage.removeItem(K.history);
-      localStorage.removeItem(K.recruiters);
-      alert("Recruiters and planning history deleted. The page will now reload.");
-      setTimeout(() => window.location.reload(), 300);
-    } catch {
-      alert("Failed to delete data.");
-    }
-  };
+// Formatting
+export const titleCase = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/\b([a-zà-ÿ])/g, (m) => m.toUpperCase());
 
-  const changeProjectName = (idx, val) => {
-    setSettings((s) => {
-      const next = clone(s);
-      next.projects[idx] = val;
-      return next;
-    });
-  };
+export const toMoney = (n) => {
+  const v = Number(n || 0);
+  return v.toFixed(2);
+};
 
-  return (
-    <div className="grid gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Projects</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          {(settings.projects || []).map((p, i) => (
-            <div key={i} className="grid gap-1">
-              <Label>Project {i + 1}</Label>
-              <Input value={p} onChange={(e) => changeProjectName(i, e.target.value)} />
-            </div>
-          ))}
-          {(!settings.projects || settings.projects.length === 0) && (
-            <div className="text-sm text-muted-foreground">Default project: Hello Fresh</div>
-          )}
-        </CardContent>
-      </Card>
+// Dates
+export const fmtISO = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+export const fmtUK = (iso) => {
+  if (!iso) return "";
+  return `${iso.slice(8,10)}/${iso.slice(5,7)}/${iso.slice(2,4)}`; // DD/MM/YY
+};
+export const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+export const startOfWeekMon = (d) => {
+  const x = new Date(d);
+  const day = (x.getDay() + 6) % 7; // Mon=0..Sun=6
+  x.setDate(x.getDate() - day);
+  x.setHours(0,0,0,0);
+  return x;
+};
+export const weekNumberISO = (d) => {
+  const date = new Date(d);
+  date.setHours(0,0,0,0);
+  date.setDate(date.getDate() + 3 - ((date.getDay() + 6) % 7));
+  const week1 = new Date(date.getFullYear(), 0, 4);
+  return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000
+    - 3 + ((week1.getDay() + 6) % 7)) / 7);
+};
+export const monthKey = (iso) => (iso || "").slice(0, 7);
+export const monthLabel = (ym) => {
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(Date.UTC(y, (m || 1) - 1, 1));
+  return d.toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+};
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Conversion Matrix</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="border rounded-lg p-3">
-              <div className="font-medium mb-2">Door-to-Door — No Discount</div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label>Box 2</Label>
-                  <Input inputMode="numeric" value={settings.conversionType.D2D.noDiscount.box2}
-                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, noDiscount:{ ...s.conversionType.D2D.noDiscount, box2:Number(e.target.value||0) }}}}))} />
-                </div>
-                <div>
-                  <Label>Box 4</Label>
-                  <Input inputMode="numeric" value={settings.conversionType.D2D.noDiscount.box4}
-                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, noDiscount:{ ...s.conversionType.D2D.noDiscount, box4:Number(e.target.value||0) }}}}))} />
-                </div>
-              </div>
-            </div>
+// Rates
+export const rateForDate = (settings, iso) => {
+  const bands = (settings?.rateBands || DEFAULT_SETTINGS.rateBands).slice().sort((a,b)=> a.startISO.localeCompare(b.startISO));
+  const target = iso || fmtISO(new Date());
+  let rate = bands[0]?.rate ?? 15;
+  for (const b of bands) if (b.startISO <= target) rate = b.rate;
+  return rate;
+};
 
-            <div className="border rounded-lg p-3">
-              <div className="font-medium mb-2">Door-to-Door — Discount</div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label>Box 2*</Label>
-                  <Input inputMode="numeric" value={settings.conversionType.D2D.discount.box2}
-                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, discount:{ ...s.conversionType.D2D.discount, box2:Number(e.target.value||0) }}}}))} />
-                </div>
-                <div>
-                  <Label>Box 4*</Label>
-                  <Input inputMode="numeric" value={settings.conversionType.D2D.discount.box4}
-                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, discount:{ ...s.conversionType.D2D.discount, box4:Number(e.target.value||0) }}}}))} />
-                </div>
-              </div>
-            </div>
-          </div>
+// Phones — fixed export
+export const formatPhoneByCountry = (raw) => {
+  const clean = String(raw || "").replace(/\s+/g, "");
+  if (!clean.startsWith("+")) return { ok: false, display: "" };
 
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="border rounded-lg p-3">
-              <div className="font-medium mb-2">Events — No Discount</div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label>Box 2</Label>
-                  <Input inputMode="numeric" value={settings.conversionType.EVENT.noDiscount.box2}
-                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, noDiscount:{ ...s.conversionType.EVENT.noDiscount, box2:Number(e.target.value||0) }}}}))} />
-                </div>
-                <div>
-                  <Label>Box 4</Label>
-                  <Input inputMode="numeric" value={settings.conversionType.EVENT.noDiscount.box4}
-                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, noDiscount:{ ...s.conversionType.EVENT.noDiscount, box4:Number(e.target.value||0) }}}}))} />
-                </div>
-              </div>
-            </div>
+  const prefixes = [
+    { cc: "+352", len: 11 }, // Luxembourg
+    { cc: "+33", len: 11 },  // France
+    { cc: "+32", len: 11 },  // Belgium
+    { cc: "+49", len: 12 },  // Germany
+  ];
 
-            <div className="border rounded-lg p-3">
-              <div className="font-medium mb-2">Events — Discount</div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label>Box 2*</Label>
-                  <Input inputMode="numeric" value={settings.conversionType.EVENT.discount.box2}
-                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, discount:{ ...s.conversionType.EVENT.discount, box2:Number(e.target.value||0) }}}}))} />
-                </div>
-                <div>
-                  <Label>Box 4*</Label>
-                  <Input inputMode="numeric" value={settings.conversionType.EVENT.discount.box4}
-                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, discount:{ ...s.conversionType.EVENT.discount, box4:Number(e.target.value||0) }}}}))} />
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+  const prefix = prefixes.find((p) => clean.startsWith(p.cc));
+  if (!prefix) return { ok: false, display: "" };
 
-      <Card>
-        <CardHeader><CardTitle>Hourly Rate Bands</CardTitle></CardHeader>
-        <CardContent className="grid gap-3">
-          {settings.rateBands.map((b, i) => (
-            <div key={i} className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              <div className="grid gap-1">
-                <Label>Start Date</Label>
-                <Input type="date" value={b.startISO} onChange={(e)=>onChangeRate(i,"startISO",e.target.value)} />
-              </div>
-              <div className="grid gap-1">
-                <Label>Rate (€)</Label>
-                <Input inputMode="numeric" value={b.rate} onChange={(e)=>onChangeRate(i,"rate",e.target.value)} />
-              </div>
-            </div>
-          ))}
-          <Button variant="outline" onClick={addRateBand}>Add Rate Band</Button>
-        </CardContent>
-      </Card>
+  const rest = clean.slice(prefix.cc.length).replace(/\D+/g, "");
+  if (!rest.length) return { ok: false, display: "" };
 
-      <div className="flex justify-end">
-        <Button variant="destructive" onClick={deletePlanningHistory}>
-          Delete Planning History
-        </Button>
-      </div>
-    </div>
-  );
-}
+  const display = `${prefix.cc} ${rest}`;
+  return { ok: true, display };
+};
+
+// Ranks
+export const rankAcr = (role) => {
+  const m = { Rookie: "RK", Promoter: "PR", "Pool Captain": "PC", "Team Captain": "TC", "Sales Manager": "SM", "Branch Manager": "BM" };
+  return m[role] || "RK";
+};
+export const rankOrderVal = (acr) => {
+  const order = { BM: 6, SM: 5, TC: 4, PC: 3, PR: 2, RK: 1 };
+  return order[acr] ?? 0;
+};
+
+// Scores & box percentages
+export const last5ScoresFor = (history, recruiterId) => {
+  return history
+    .filter(h => h.recruiterId === recruiterId && h.score != null)
+    .sort((a,b) => (a.dateISO < b.dateISO ? 1 : -1))
+    .slice(0,5)
+    .map(h => Number(h.score) || 0);
+};
+
+export const boxPercentsLast8w = (history, recruiterId) => {
+  const now = new Date();
+  const eightWeeksAgo = addDays(now, -56);
+  const rows = history.filter(h => h.recruiterId === recruiterId && new Date(h.dateISO || h.date) >= eightWeeksAgo);
+  let b2 = 0, b4 = 0, s = 0;
+  rows.forEach(r => {
+    const score = Number(r.score) || 0;
+    const b2x = (Number(r.box2_noDisc)||0) + (Number(r.box2_disc)||0);
+    const b4x = (Number(r.box4_noDisc)||0) + (Number(r.box4_disc)||0);
+    b2 += b2x; b4 += b4x; s += score;
+  });
+  const pct = (num, den) => den > 0 ? (num / den) * 100 : 0;
+  return { b2: pct(b2, s), b4: pct(b4, s) };
+};
