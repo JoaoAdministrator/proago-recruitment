@@ -1,212 +1,172 @@
-// util.js
-// Proago CRM — helpers, storage, dates, money, ranks (acronyms), "Hello Fresh", Indeed importer
+// Settings.jsx — Proago CRM (v2025-08-29g)
+// Changes:
+// • Project = “Hello Fresh”
+// • Conversion matrix headings without parentheses
+// • “Delete Planning History” also deletes Recruiters + History (hard reset), then suggests reload
 
-/* ==============================
-   Storage helpers
-============================== */
-export const K = {
-  settings: "proago_settings_v2",
-  leads: "proago_leads_v1",
-  recruiters: "proago_recruiters_v1",
-  planning: "proago_planning_v1",
-  history: "proago_history_v1",
-};
+import React from "react";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { load, K, DEFAULT_SETTINGS, clone } from "../util";
 
-export const load = (key, fallback) => {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : (fallback ?? null);
-  } catch {
-    return fallback ?? null;
-  }
-};
+export default function Settings({ settings, setSettings }) {
 
-export const save = (key, value) => {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-};
-
-export const clone = (x) => JSON.parse(JSON.stringify(x));
-
-/* ==============================
-   Dates & formatting
-============================== */
-export const fmtISO = (d) => {
-  const date = d instanceof Date ? d : new Date(d);
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const da = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${da}`;
-};
-
-export const fmtUK = (iso) => {
-  if (!iso) return "";
-  const y = iso.slice(2, 4), m = iso.slice(5, 7), d = iso.slice(8, 10);
-  return `${d}/${m}/${y}`;
-};
-
-export const addDays = (date, days) => {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
-};
-
-export const startOfWeekMon = (date) => {
-  const d = new Date(date);
-  const day = (d.getDay() + 6) % 7; // Mon=0..Sun=6
-  d.setDate(d.getDate() - day);
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
-
-export const weekNumberISO = (date) => {
-  const tmp = new Date(date);
-  tmp.setHours(0, 0, 0, 0);
-  tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay() + 6) % 7));
-  const week1 = new Date(tmp.getFullYear(), 0, 4);
-  return 1 + Math.round(
-    ((tmp.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7
-  );
-};
-
-export const monthKey = (iso) => {
-  const s = (iso || "").slice(0, 7);
-  return /^\d{4}-\d{2}$/.test(s) ? s : "";
-};
-
-const MONTHS = [
-  "January","February","March","April","May","June",
-  "July","August","September","October","November","December"
-];
-
-export const monthLabel = (ym) => {
-  if (!ym || ym.length < 7) return ym || "";
-  const y = ym.slice(0, 4);
-  const m = Number(ym.slice(5, 7)) - 1;
-  return `${MONTHS[m]} ${y}`;
-};
-
-export const toMoney = (n) => Number(n || 0).toFixed(2);
-
-/* ==============================
-   Ranks (acronyms + ordering)
-============================== */
-export const RANK_ACRONYM = {
-  "Branch Manager": "BM",
-  "Sales Manager": "SM",
-  "Team Captain": "TC",
-  "Pool Captain": "PC",
-  "Promoter": "PR",
-  "Rookie": "RK",
-};
-
-export const toRankAcr = (role) => {
-  if (!role) return "RK";
-  const full = String(role).trim();
-  if (RANK_ACRONYM[full]) return RANK_ACRONYM[full];
-  const U = full.toUpperCase();
-  if (["BM","SM","TC","PC","PR","RK"].includes(U)) return U;
-  return "RK";
-};
-
-const RANK_ORDER = { BM: 6, SM: 5, TC: 4, PC: 3, PR: 2, RK: 1 };
-export const rankOrderValue = (role) => RANK_ORDER[toRankAcr(role)] || 0;
-
-/* ==============================
-   Settings (Hello Fresh default, conversion, rate bands)
-============================== */
-export const DEFAULT_SETTINGS = {
-  projects: ["Hello Fresh"],
-  conversionType: {
-    D2D: {
-      noDiscount: { box2: 0, box4: 0 },
-      discount:   { box2: 0, box4: 0 },
-    },
-    EVENT: {
-      noDiscount: { box2: 0, box4: 0 },
-      discount:   { box2: 0, box4: 0 },
-    },
-  },
-  rateBands: [
-    { startISO: "2025-01-01", rate: 15 },
-  ],
-};
-
-export const rateForDate = (settings, dateISO) => {
-  const s = settings || DEFAULT_SETTINGS;
-  const bands = (s.rateBands || []).slice().sort((a,b)=> (a.startISO<b.startISO?-1:1));
-  const d = dateISO ? new Date(dateISO) : new Date();
-  let current = bands[0]?.rate ?? 15;
-  for (const b of bands) if (new Date(b.startISO) <= d) current = Number(b.rate || 0);
-  return current;
-};
-
-/* ==============================
-   Indeed Import helpers
-============================== */
-export const coalesce = (...vals) =>
-  vals.find((v) => v !== undefined && v !== null && v !== "") ?? "";
-
-export function extractIndeedAppliedAt(raw) {
-  const picks = [
-    raw?.applicant?.appliedOnMillis,
-    raw?.applicant?.createdOnMillis,
-    raw?.receivedOnMillis,
-    raw?.analytics?.receivedOnMillis,
-  ].filter((v) => typeof v === "number" && v > 0);
-  return picks.length ? new Date(picks[0]).toISOString() : new Date().toISOString();
-}
-
-export function normalizeIndeedLead(raw) {
-  if (!raw || typeof raw !== "object") throw new Error("Invalid Indeed JSON");
-  const appliedAtISO = extractIndeedAppliedAt(raw);
-  const fullName = coalesce(raw?.applicant?.fullName, "");
-  const email = coalesce(raw?.applicant?.email, raw?.applicant?.emailAlias, "");
-  const phone = coalesce(raw?.applicant?.phoneNumber, "");
-  const country = coalesce(raw?.applicant?.location?.country, "");
-  const city = coalesce(raw?.applicant?.location?.city, "");
-  const jobTitle = coalesce(raw?.job?.jobTitle, "");
-  const jobCompany = coalesce(raw?.job?.jobCompany, "");
-  const jobLocation = coalesce(raw?.job?.jobLocation, "");
-  const jobUrl = coalesce(raw?.job?.jobUrl, "");
-  const resumeFileName = coalesce(raw?.applicant?.resume?.file?.fileName, "");
-  const qa = Array.isArray(raw?.questionsAndAnswers?.questionsAndAnswers)
-    ? raw.questionsAndAnswers.questionsAndAnswers.map((q) => ({
-        question: q?.question?.question ?? "",
-        answer: q?.answer?.label ?? q?.answer?.value ?? "",
-      }))
-    : [];
-  return {
-    id:
-      (typeof crypto !== "undefined" && crypto.randomUUID)
-        ? crypto.randomUUID()
-        : `lead_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-    name: fullName,
-    email,
-    mobile: phone,
-    source: "Indeed",
-    appliedAtISO,
-    calls: 0,
-    location: { country, city },
-    jobInfo: { jobTitle, jobCompany, jobLocation, jobUrl },
-    resumeFileName,
-    qa,
-    interviewAtISO: "",
-    formationAtISO: "",
-    notes: "",
+  const onChangeRate = (i, field, value) => {
+    setSettings((s) => {
+      const next = clone(s);
+      next.rateBands[i][field] = field === "rate" ? Number(value || 0) : value;
+      return next;
+    });
   };
-}
 
-export function parseIndeedFiles(fileContentsArray) {
-  const results = [];
-  const errors = [];
-  for (const { name, text } of fileContentsArray) {
+  const addRateBand = () => {
+    setSettings((s) => {
+      const next = clone(s);
+      next.rateBands.push({ startISO: "2026-01-01", rate: 16 });
+      return next;
+    });
+  };
+
+  const deletePlanningHistory = () => {
+    if (!confirm("Delete ALL recruiters and ALL planning history? This cannot be undone.")) return;
     try {
-      const raw = JSON.parse(text);
-      const lead = normalizeIndeedLead(raw);
-      results.push(lead);
-    } catch (e) {
-      errors.push({ file: name, error: e?.message || String(e) });
+      localStorage.removeItem(K.history);
+      localStorage.removeItem(K.recruiters);
+      alert("Recruiters and planning history deleted. The page will now reload.");
+      setTimeout(() => window.location.reload(), 300);
+    } catch {
+      alert("Failed to delete data.");
     }
-  }
-  return { results, errors };
+  };
+
+  const changeProjectName = (idx, val) => {
+    setSettings((s) => {
+      const next = clone(s);
+      next.projects[idx] = val;
+      return next;
+    });
+  };
+
+  return (
+    <div className="grid gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Projects</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          {(settings.projects || []).map((p, i) => (
+            <div key={i} className="grid gap-1">
+              <Label>Project {i + 1}</Label>
+              <Input value={p} onChange={(e) => changeProjectName(i, e.target.value)} />
+            </div>
+          ))}
+          {(!settings.projects || settings.projects.length === 0) && (
+            <div className="text-sm text-muted-foreground">Default project: Hello Fresh</div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Conversion Matrix</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="border rounded-lg p-3">
+              <div className="font-medium mb-2">Door-to-Door — No Discount</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Box 2</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.D2D.noDiscount.box2}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, noDiscount:{ ...s.conversionType.D2D.noDiscount, box2:Number(e.target.value||0) }}}}))} />
+                </div>
+                <div>
+                  <Label>Box 4</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.D2D.noDiscount.box4}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, noDiscount:{ ...s.conversionType.D2D.noDiscount, box4:Number(e.target.value||0) }}}}))} />
+                </div>
+              </div>
+            </div>
+
+            <div className="border rounded-lg p-3">
+              <div className="font-medium mb-2">Door-to-Door — Discount</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Box 2*</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.D2D.discount.box2}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, discount:{ ...s.conversionType.D2D.discount, box2:Number(e.target.value||0) }}}}))} />
+                </div>
+                <div>
+                  <Label>Box 4*</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.D2D.discount.box4}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, D2D:{ ...s.conversionType.D2D, discount:{ ...s.conversionType.D2D.discount, box4:Number(e.target.value||0) }}}}))} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="border rounded-lg p-3">
+              <div className="font-medium mb-2">Events — No Discount</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Box 2</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.EVENT.noDiscount.box2}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, noDiscount:{ ...s.conversionType.EVENT.noDiscount, box2:Number(e.target.value||0) }}}}))} />
+                </div>
+                <div>
+                  <Label>Box 4</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.EVENT.noDiscount.box4}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, noDiscount:{ ...s.conversionType.EVENT.noDiscount, box4:Number(e.target.value||0) }}}}))} />
+                </div>
+              </div>
+            </div>
+
+            <div className="border rounded-lg p-3">
+              <div className="font-medium mb-2">Events — Discount</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label>Box 2*</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.EVENT.discount.box2}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, discount:{ ...s.conversionType.EVENT.discount, box2:Number(e.target.value||0) }}}}))} />
+                </div>
+                <div>
+                  <Label>Box 4*</Label>
+                  <Input inputMode="numeric" value={settings.conversionType.EVENT.discount.box4}
+                    onChange={(e)=> setSettings(s=>({ ...s, conversionType:{ ...s.conversionType, EVENT:{ ...s.conversionType.EVENT, discount:{ ...s.conversionType.EVENT.discount, box4:Number(e.target.value||0) }}}}))} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>Hourly Rate Bands</CardTitle></CardHeader>
+        <CardContent className="grid gap-3">
+          {settings.rateBands.map((b, i) => (
+            <div key={i} className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              <div className="grid gap-1">
+                <Label>Start Date</Label>
+                <Input type="date" value={b.startISO} onChange={(e)=>onChangeRate(i,"startISO",e.target.value)} />
+              </div>
+              <div className="grid gap-1">
+                <Label>Rate (€)</Label>
+                <Input inputMode="numeric" value={b.rate} onChange={(e)=>onChangeRate(i,"rate",e.target.value)} />
+              </div>
+            </div>
+          ))}
+          <Button variant="outline" onClick={addRateBand}>Add Rate Band</Button>
+        </CardContent>
+      </Card>
+
+      <div className="flex justify-end">
+        <Button variant="destructive" onClick={deletePlanningHistory}>
+          Delete Planning History
+        </Button>
+      </div>
+    </div>
+  );
 }
