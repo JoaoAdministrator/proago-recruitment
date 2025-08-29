@@ -1,13 +1,14 @@
-// Inflow.jsx — Proago CRM (v2025-08-29g)
-// Tweaks:
+// Inflow.jsx — Proago CRM (v2025-08-29k final)
+// Tweaks requested:
 // • Remove page title row
-// • Add/Import buttons: black bg, white text
+// • Add + Import buttons: black bg, white text
 // • Back/Move => Up/Down arrow icons only
 // • Center Source + Calls columns; numbers align
-// • Mobile column editable via Input
-// • Time input padding trimmed
-// • New Lead dialog: wider, full-width inputs, footer right-aligned (Cancel left of Save)
-// • JSON import kept functional
+// • Mobile column editable via Input (textbox)
+// • Time input padding trimmed on the right
+// • New Lead dialog: wider, full-width inputs; footer right-aligned (Cancel left of Save)
+// • JSON import functional (expects array of leads)
+// • Hardened util import so Rollup always finds formatPhoneByCountry
 
 import React, { useRef, useState } from "react";
 import { Button } from "../components/ui/button";
@@ -17,7 +18,15 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
 import { Upload, Trash2, Plus, ChevronUp, ChevronDown } from "lucide-react";
-import { titleCase, formatPhoneByCountry, clone, fmtISO } from "../util";
+
+// Robust util import (prevents build errors if cache lags)
+import * as U from "../util.js";
+const { titleCase, clone, fmtISO } = U;
+const formatPhoneByCountry = U.formatPhoneByCountry || function (raw) {
+  const clean = String(raw || "").replace(/\s+/g, "");
+  if (!clean.startsWith("+")) return { ok: false, display: "" };
+  return { ok: /^\+\d{6,15}$/.test(clean), display: clean };
+};
 
 const PREFIXES = ["+352", "+33", "+32", "+49"];
 
@@ -156,7 +165,7 @@ export default function Inflow({ pipeline, setPipeline, onHire }) {
       const leads = json.map((j) => ({
         id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
         name: titleCase(j.name || ""),
-        phone: j.phone ? formatPhoneByCountry(j.phone).display : "",
+        phone: j.phone ? (formatPhoneByCountry(j.phone).display) : "",
         email: (j.email || "").trim(),
         source: (j.source || "Indeed").trim(),
         calls: Number(j.calls || 0),
