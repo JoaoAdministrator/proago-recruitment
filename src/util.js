@@ -1,157 +1,248 @@
-// util.js — Proago CRM shared helpers (v2025-08-29)
-// Updates:
-// • monthLabel full names
-// • role acronyms mapping + order
-// • labels standardized: "Box 2", "Box 2*", "Box 4", "Box 4*"
-// • project display: Hello Fresh
-export const load = (k, fallback) => {
-  try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fallback; }
-  catch { return fallback; }
-};
-export const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+// util.js
+// Proago CRM — helpers, storage, dates, money, ranks, "Hello Fresh", Indeed importer
 
+/* ==============================
+   Storage helpers
+============================== */
 export const K = {
-  recruiters: "proago_recruiters_v7",
-  pipeline:   "proago_pipeline_v6",
-  history:    "proago_history_v7_discounts",
-  planning:   "proago_planning_v6",
-  settings:   "proago_settings_v4_bands_projects",
+  settings: "proago_settings_v2",
+  leads: "proago_leads_v1",
+  recruiters: "proago_recruiters_v1",
+  planning: "proago_planning_v1",
+  history: "proago_history_v1",
 };
 
-export const clone = typeof structuredClone === "function"
-  ? structuredClone
-  : (obj) => JSON.parse(JSON.stringify(obj));
-
-// Dates
-export const fmtISO = (d) => new Date(Date.UTC(
-  d.getUTCFullYear?.() ?? d.getFullYear(),
-  d.getUTCMonth?.() ?? d.getMonth(),
-  d.getUTCDate?.() ?? d.getDate()
-)).toISOString().slice(0,10);
-export const addDays = (date, n) => { const d = new Date(date); d.setUTCDate(d.getUTCDate() + n); return d; };
-export const startOfWeekMon = (date = new Date()) => {
-  const d = new Date(Date.UTC(
-    date.getUTCFullYear?.() ?? date.getFullYear(),
-    date.getUTCMonth?.() ?? date.getMonth(),
-    date.getUTCDate?.() ?? date.getDate()
-  ));
-  const day = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - day); d.setUTCHours(0,0,0,0); return d;
-};
-export const weekNumberISO = (date) => {
-  const d = new Date(Date.UTC(
-    date.getUTCFullYear?.() ?? date.getFullYear(),
-    date.getUTCMonth?.() ?? date.getMonth(),
-    date.getUTCDate?.() ?? date.getDate()
-  ));
-  d.setUTCHours(0,0,0,0);
-  d.setUTCDate(d.getUTCDate() + 3 - ((d.getUTCDay() + 6) % 7));
-  const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
-  firstThursday.setUTCDate(firstThursday.getUTCDate() + 3 - ((firstThursday.getUTCDay() + 6) % 7));
-  return 1 + Math.round(((d - firstThursday) / 86400000) / 7);
-};
-export const fmtUK = (iso) => { if (!iso) return ""; const [y,m,d] = iso.split("-"); return `${d}/${m}/${String(y).slice(2)}`; };
-export const monthKey = (iso) => (iso || "").slice(0, 7);
-export const monthLabel = (ym) => {
-  const [y, m] = ym.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
-};
-
-// Money
-export const toMoney = (n) => (Number(n || 0)).toFixed(2);
-
-// Names & phone formatting (no flags)
-export const titleCase = (s = "") =>
-  s.trim().toLowerCase().replace(/\s+/g, " ").split(" ").map(w => (w ? w[0].toUpperCase() + w.slice(1) : "")).join(" ");
-
-const normalizeDigits = (raw="") => raw.replace(/[()\-\.\s]/g,"").replace(/^00/,"+");
-const ALLOWED_CCS = ["+352","+33","+32","+49"];
-const detectCC = (raw="") => { const s = normalizeDigits(raw); const cc = ALLOWED_CCS.find(cc => s.startsWith(cc)); return cc || ""; };
-
-export const formatPhoneByCountry = (raw = "") => {
-  let s = normalizeDigits(raw);
-  if (!s.startsWith("+")) return { display: "", cc: "", ok: false };
-  const cc = detectCC(s);
-  if (!cc) return { display: "", cc, ok: false };
-  let rest = s.slice(cc.length);
-  if (cc === "+352") {
-    rest = rest.replace(/(\d{3})(?=\d)/g, "$1 ").trim();
-  } else if (cc === "+33" || cc === "+32") {
-    rest = rest.replace(/(\d{2})(?=\d)/g, "$1 ").trim();
-  } else if (cc === "+49") {
-    rest = rest.replace(/(\d{3})(?=\d)/g, "$1 ").trim();
+export const load = (key, fallback) => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : (fallback ?? null);
+  } catch {
+    return fallback ?? null;
   }
-  return { display: `${cc} ${rest}`.trim(), cc, ok: true };
 };
 
-// Rank mapping + order
-export const rankAcr = (role) => {
-  const map = {
-    "Branch Manager": "BM",
-    "Sales Manager": "SM",
-    "Team Captain": "TC",
-    "Pool Captain": "PC",
-    "Promoter": "PR",
-    "Rookie": "RK",
-    // already acronyms pass-through:
-    "BM":"BM","SM":"SM","TC":"TC","PC":"PC","PR":"PR","RK":"RK"
-  };
-  return map[role] || role || "RK";
+export const save = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {}
 };
-export const rankOrderVal = (acronym) => ({ BM:6, SM:5, TC:4, PC:3, PR:2, RK:1 }[acronym] || 0);
 
-// Settings defaults (Hello Fresh)
+export const clone = (x) => JSON.parse(JSON.stringify(x));
+
+/* ==============================
+   Dates & formatting
+============================== */
+export const fmtISO = (d) => {
+  const date = d instanceof Date ? d : new Date(d);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const da = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${da}`;
+};
+
+export const fmtUK = (iso) => {
+  // 2025-08-04 -> 04/08/25
+  if (!iso) return "";
+  const y = iso.slice(2, 4);
+  const m = iso.slice(5, 7);
+  const d = iso.slice(8, 10);
+  return `${d}/${m}/${y}`;
+};
+
+export const addDays = (date, days) => {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+};
+
+export const startOfWeekMon = (date) => {
+  const d = new Date(date);
+  const day = (d.getDay() + 6) % 7; // Mon=0..Sun=6
+  d.setDate(d.getDate() - day);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+export const weekNumberISO = (date) => {
+  // ISO week number
+  const tmp = new Date(date);
+  tmp.setHours(0, 0, 0, 0);
+  // Thursday in current week decides the year.
+  tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay() + 6) % 7));
+  const week1 = new Date(tmp.getFullYear(), 0, 4);
+  return (
+    1 +
+    Math.round(
+      ((tmp.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) /
+        7
+    )
+  );
+};
+
+export const monthKey = (iso) => {
+  const s = (iso || "").slice(0, 7);
+  return /^\d{4}-\d{2}$/.test(s) ? s : "";
+};
+
+const MONTHS = [
+  "January","February","March","April","May","June",
+  "July","August","September","October","November","December"
+];
+
+export const monthLabel = (ym) => {
+  // "2025-08" -> "August 2025"
+  if (!ym || ym.length < 7) return ym || "";
+  const y = ym.slice(0, 4);
+  const m = Number(ym.slice(5, 7)) - 1;
+  return `${MONTHS[m]} ${y}`;
+};
+
+export const toMoney = (n) => {
+  const v = Number(n || 0);
+  return v.toFixed(2);
+};
+
+/* ==============================
+   Ranks (acronyms + ordering)
+============================== */
+// Full names normalized → acronyms
+export const RANK_ACRONYM = {
+  "Branch Manager": "BM",
+  "Sales Manager": "SM",
+  "Team Captain": "TC",
+  "Pool Captain": "PC",
+  Promoter: "PR",
+  Rookie: "RK",
+};
+
+export const toRankAcr = (role) => {
+  if (!role) return "RK";
+  // Accept either full or already-acronym values
+  const full = String(role).trim();
+  if (RANK_ACRONYM[full]) return RANK_ACRONYM[full];
+  const U = full.toUpperCase();
+  if (["BM","SM","TC","PC","PR","RK"].includes(U)) return U;
+  return "RK";
+};
+
+// Order: BM > SM > TC > PC > PR > RK
+const RANK_ORDER = { BM: 6, SM: 5, TC: 4, PC: 3, PR: 2, RK: 1 };
+export const rankOrderValue = (role) => RANK_ORDER[toRankAcr(role)] || 0;
+
+/* ==============================
+   Settings (Hello Fresh default, conversion, rate bands)
+============================== */
 export const DEFAULT_SETTINGS = {
   projects: ["Hello Fresh"],
+  // Conversion matrix (values: € per conversion; labels handled in UI)
   conversionType: {
     D2D: {
-      noDiscount: { box2: 95,  box4: 125 }, // "Box 2", "Box 4"
-      discount:   { box2: 80,  box4: 110 }, // "Box 2*", "Box 4*"
+      noDiscount: { box2: 0, box4: 0 },
+      discount:   { box2: 0, box4: 0 },
     },
     EVENT: {
-      noDiscount: { box2: 60,  box4: 70 },
-      discount:   { box2: 45,  box4: 55 },
+      noDiscount: { box2: 0, box4: 0 },
+      discount:   { box2: 0, box4: 0 },
     },
   },
+  // Hourly rate bands by start date
   rateBands: [
-    { startISO: "1900-01-01", rate: 15.2473 },
-    { startISO: "2025-05-01", rate: 15.6265 },
+    { startISO: "2025-01-01", rate: 15 },
   ],
 };
 
-export const rateForDate = (settings, iso) => {
-  const bands = [...(settings?.rateBands || [])].sort((a,b)=> a.startISO < b.startISO ? 1 : -1);
-  const d = iso || fmtISO(new Date());
-  const band = bands.find(b => b.startISO <= d) || bands[bands.length-1] || { rate: DEFAULT_SETTINGS.rateBands[0].rate };
-  return band.rate;
+export const rateForDate = (settings, dateISO) => {
+  const s = settings || DEFAULT_SETTINGS;
+  const bands = (s.rateBands || []).slice().sort((a,b)=> (a.startISO<b.startISO?-1:1));
+  const d = dateISO ? new Date(dateISO) : new Date();
+  let current = bands[0]?.rate ?? 15;
+  for (const b of bands) {
+    if (new Date(b.startISO) <= d) current = Number(b.rate || 0);
+  }
+  return current;
 };
 
-// History helpers for recruiters metrics
-export const isWithinLastWeeks = (iso, weeks = 8) => {
-  const [y,m,d]=iso.split("-").map(Number);
-  const row = new Date(Date.UTC(y, m-1, d));
-  const today = startOfWeekMon(new Date());
-  const diffDays = (today - row) / 86400000;
-  return diffDays >= 0 && diffDays <= weeks * 7;
-};
-export const boxTotals = (row) => {
-  const b2 = (Number(row.box2_noDisc)||0) + (Number(row.box2_disc)||0);
-  const b4 = (Number(row.box4_noDisc)||0) + (Number(row.box4_disc)||0);
-  return { b2, b4 };
-};
-export const last5ScoresFor = (history, recruiterId) =>
-  history
-    .filter(h => h.recruiterId === recruiterId && typeof h.score === "number")
-    .sort((a,b)=> (a.dateISO < b.dateISO ? 1 : -1))
-    .slice(0,5)
-    .map(h => Number(h.score) || 0);
-export const boxPercentsLast8w = (history, recruiterId) => {
-  const rows = history.filter(h => h.recruiterId === recruiterId && h.dateISO && isWithinLastWeeks(h.dateISO, 8));
-  const totals = rows.reduce((acc, r) => {
-    const { b2, b4 } = boxTotals(r);
-    acc.sales += (Number(r.score) || 0);
-    acc.b2 += b2; acc.b4 += b4;
-    return acc;
-  }, { sales: 0, b2: 0, b4: 0 });
-  const pct = (n, d) => (d > 0 ? (n / d) * 100 : 0);
-  return { b2: pct(totals.b2, totals.sales), b4: pct(totals.b4, totals.sales) };
-};
+/* ==============================
+   Indeed Import helpers
+============================== */
+export const coalesce = (...vals) =>
+  vals.find((v) => v !== undefined && v !== null && v !== "") ?? "";
+
+export function extractIndeedAppliedAt(raw) {
+  const picks = [
+    raw?.applicant?.appliedOnMillis,
+    raw?.applicant?.createdOnMillis,
+    raw?.receivedOnMillis,
+    raw?.analytics?.receivedOnMillis,
+  ].filter((v) => typeof v === "number" && v > 0);
+  return picks.length ? new Date(picks[0]).toISOString() : new Date().toISOString();
+}
+
+export function normalizeIndeedLead(raw) {
+  if (!raw || typeof raw !== "object") throw new Error("Invalid Indeed JSON");
+
+  const appliedAtISO = extractIndeedAppliedAt(raw);
+  const fullName = coalesce(raw?.applicant?.fullName, "");
+  const email = coalesce(raw?.applicant?.email, raw?.applicant?.emailAlias, "");
+  const phone = coalesce(raw?.applicant?.phoneNumber, "");
+
+  const country = coalesce(raw?.applicant?.location?.country, "");
+  const city = coalesce(raw?.applicant?.location?.city, "");
+  const jobTitle = coalesce(raw?.job?.jobTitle, "");
+  const jobCompany = coalesce(raw?.job?.jobCompany, "");
+  const jobLocation = coalesce(raw?.job?.jobLocation, "");
+  const jobUrl = coalesce(raw?.job?.jobUrl, "");
+  const resumeFileName = coalesce(raw?.applicant?.resume?.file?.fileName, "");
+
+  const qa = Array.isArray(raw?.questionsAndAnswers?.questionsAndAnswers)
+    ? raw.questionsAndAnswers.questionsAndAnswers.map((q) => ({
+        question: q?.question?.question ?? "",
+        answer: q?.answer?.label ?? q?.answer?.value ?? "",
+      }))
+    : [];
+
+  return {
+    id:
+      (typeof crypto !== "undefined" && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `lead_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    name: fullName,
+    email,
+    mobile: phone, // Phone → Mobile
+    source: "Indeed",
+    appliedAtISO, // Leads date/time (independent of interview/formation)
+    calls: 0,
+
+    location: { country, city },
+    jobInfo: { jobTitle, jobCompany, jobLocation, jobUrl },
+    resumeFileName,
+    qa,
+
+    interviewAtISO: "",
+    formationAtISO: "",
+    notes: "",
+  };
+}
+
+export function parseIndeedFiles(fileContentsArray) {
+  const results = [];
+  const errors = [];
+  for (const { name, text } of fileContentsArray) {
+    try {
+      const raw = JSON.parse(text);
+      const lead = normalizeIndeedLead(raw);
+      results.push(lead);
+    } catch (e) {
+      errors.push({ file: name, error: e?.message || String(e) });
+    }
+  }
+  return { results, errors };
+}
+
+/* ==============================
+   Misc (title case if needed)
+============================== */
+export const titleCase = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
